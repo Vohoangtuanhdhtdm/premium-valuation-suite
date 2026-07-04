@@ -1,5 +1,6 @@
-import { useMemo, useState } from "react";
-import { Building2, MapPin, Type, Loader2, Sparkles, TrendingUp, TrendingDown, Home, Ruler, Layers, DoorOpen, Bath, BedDouble, ArrowRight } from "lucide-react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { Building2, MapPin, Type, Loader2, Sparkles, TrendingUp, TrendingDown, Home, Ruler, Layers, DoorOpen, Bath, BedDouble, CheckCircle2, AlertCircle } from "lucide-react";
+import { toast } from "sonner";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -7,22 +8,13 @@ import { Label } from "@/components/ui/label";
 import { Slider } from "@/components/ui/slider";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
-import {
-  BarChart,
-  Bar,
-  XAxis,
-  YAxis,
-  Cell,
-  ResponsiveContainer,
-  Tooltip as ReTooltip,
-} from "recharts";
 
 type LocationMode = "text" | "pin";
 
 interface FormState {
   address: string;
-  lat: number;
-  lng: number;
+  lat: number | null;
+  lng: number | null;
   area: number;
   floors: number;
   frontage: number;
@@ -36,23 +28,18 @@ interface ShapFactor {
   impact: number; // percent, +/-
 }
 
-interface Comp {
-  address: string;
-  area: number;
-  price: number; // VND
-  date: string;
-  distance: number; // km
-}
-
 interface ValuationResult {
   total: number; // VND
   unit: number; // VND / m²
-  min: number;
-  max: number;
   score: number; // 0-100
   shap: ShapFactor[];
-  comps: Comp[];
 }
+
+type GeoStatus =
+  | { kind: "idle" }
+  | { kind: "loading" }
+  | { kind: "success"; lat: number; lon: number; display: string }
+  | { kind: "error"; message: string };
 
 const VND = (v: number) => {
   if (v >= 1_000_000_000)
@@ -66,68 +53,56 @@ function clamp(v: number, min: number, max: number) {
   return Math.min(max, Math.max(min, v));
 }
 
-async function mockValuationAPI(input: FormState): Promise<ValuationResult> {
-  // Simulated REST call — swap with real endpoint later.
-  await new Promise((r) => setTimeout(r, 1400));
+const VALUATION_ENDPOINT = "http://localhost:8000/api/v1/valuate";
 
-  const basePerM2 = 110_000_000; // 110tr/m²
-  const locationFactor = 1 + (Math.sin(input.lat * 12.7 + input.lng * 9.3) * 0.15);
-  const floorsBoost = 1 + (input.floors - 1) * 0.045;
-  const frontageBoost = 1 + clamp((input.frontage - 4) / 20, -0.1, 0.35);
-  const roadBoost = 1 + clamp((input.roadWidth - 6) / 60, -0.08, 0.28);
-  const roomBoost = 1 + (input.bedrooms + input.bathrooms) * 0.008;
+async function callValuationAPI(input: {
+  lat: number;
+  lon: number;
+  area: number;
+  floors: number;
+  frontage: number;
+  road_width: number;
+  bedrooms: number;
+  bathrooms: number;
+}): Promise<ValuationResult> {
+  const res = await fetch(VALUATION_ENDPOINT, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  });
 
-  const unit = Math.round(basePerM2 * locationFactor * frontageBoost * roadBoost);
-  const total = Math.round(unit * input.area * floorsBoost * roomBoost);
-  const min = Math.round(total * 0.91);
-  const max = Math.round(total * 1.09);
+  if (!res.ok) {
+    let detail = `${res.status} ${res.statusText}`;
+    try {
+      const err = await res.json();
+      if (err?.detail) {
+        detail = typeof err.detail === "string" ? err.detail : JSON.stringify(err.detail);
+      }
+    } catch {
+      /* ignore */
+    }
+    throw new Error(detail);
+  }
 
-  const score = Math.round(
-    clamp(55 + (locationFactor - 1) * 200 + input.roadWidth * 0.4 + input.frontage * 0.6, 20, 98),
-  );
-
+  const data = await res.json();
+  const total = Number(data?.valuation?.total_price_vnd ?? 0);
+  const unit = Number(data?.valuation?.unit_price_vnd ?? 0);
+  const score = Math.round(Number(data?.spatial_insights?.score_100 ?? 0));
+  const shapley = data?.shapley ?? {};
   const shap: ShapFactor[] = [
-    { label: "Vị trí không gian", impact: Math.round((locationFactor - 1) * 100) },
-    { label: "Mặt tiền rộng", impact: Math.round((frontageBoost - 1) * 100) },
-    { label: "Đường trước nhà", impact: Math.round((roadBoost - 1) * 100) },
-    { label: "Số tầng", impact: Math.round((floorsBoost - 1) * 100) },
-    { label: "Số phòng", impact: Math.round((roomBoost - 1) * 100) },
-    { label: "Tuổi công trình", impact: -Math.round(3 + Math.random() * 4) },
+    { label: "Diện tích", impact: Math.round(Number(shapley.area ?? 0) * 100) / 100 },
+    { label: "Vị trí không gian", impact: Math.round(Number(shapley.spatial ?? 0) * 100) / 100 },
   ].sort((a, b) => Math.abs(b.impact) - Math.abs(a.impact));
 
-  const comps: Comp[] = [
-    {
-      address: "12 Trần Hưng Đạo, Q.1",
-      area: input.area + 8,
-      price: Math.round(total * 1.04),
-      date: "03/2026",
-      distance: 0.4,
-    },
-    {
-      address: "45 Lê Lợi, Q.1",
-      area: input.area - 6,
-      price: Math.round(total * 0.93),
-      date: "11/2025",
-      distance: 0.7,
-    },
-    {
-      address: "88 Nguyễn Huệ, Q.1",
-      area: input.area + 2,
-      price: Math.round(total * 1.01),
-      date: "01/2026",
-      distance: 0.9,
-    },
-  ];
-
-  return { total, unit, min, max, score, shap, comps };
+  return { total, unit, score, shap };
 }
 
 export function ValuationApp() {
   const [locMode, setLocMode] = useState<LocationMode>("text");
   const [form, setForm] = useState<FormState>({
-    address: "23 Nguyễn Thị Minh Khai, Quận 1, TP.HCM",
-    lat: 10.7769,
-    lng: 106.7009,
+    address: "",
+    lat: null,
+    lng: null,
     area: 80,
     floors: 4,
     frontage: 5,
@@ -135,11 +110,49 @@ export function ValuationApp() {
     bedrooms: 3,
     bathrooms: 3,
   });
+  const [geo, setGeo] = useState<GeoStatus>({ kind: "idle" });
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<ValuationResult | null>(null);
 
   const update = <K extends keyof FormState>(k: K, v: FormState[K]) =>
     setForm((f) => ({ ...f, [k]: v }));
+
+  // Debounced geocoding via OpenStreetMap Nominatim
+  const geocodeSeq = useRef(0);
+  useEffect(() => {
+    if (locMode !== "text") return;
+    const q = form.address.trim();
+    if (q.length < 4) {
+      setGeo({ kind: "idle" });
+      setForm((f) => (f.lat === null && f.lng === null ? f : { ...f, lat: null, lng: null }));
+      return;
+    }
+    const seq = ++geocodeSeq.current;
+    setGeo({ kind: "loading" });
+    const t = setTimeout(async () => {
+      try {
+        const url = `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(q)}&format=json&limit=1`;
+        const res = await fetch(url, { headers: { Accept: "application/json" } });
+        if (!res.ok) throw new Error(`Geocoding ${res.status}`);
+        const arr = (await res.json()) as Array<{ lat: string; lon: string; display_name: string }>;
+        if (seq !== geocodeSeq.current) return;
+        if (!arr.length) {
+          setGeo({ kind: "error", message: "Không tìm thấy toạ độ cho địa chỉ này" });
+          setForm((f) => ({ ...f, lat: null, lng: null }));
+          return;
+        }
+        const lat = parseFloat(arr[0].lat);
+        const lon = parseFloat(arr[0].lon);
+        setGeo({ kind: "success", lat, lon, display: arr[0].display_name });
+        setForm((f) => ({ ...f, lat, lng: lon }));
+      } catch (e) {
+        if (seq !== geocodeSeq.current) return;
+        setGeo({ kind: "error", message: (e as Error).message || "Lỗi mã hoá địa chỉ" });
+        setForm((f) => ({ ...f, lat: null, lng: null }));
+      }
+    }, 600);
+    return () => clearTimeout(t);
+  }, [form.address, locMode]);
 
   const valid = useMemo(() => {
     return (
@@ -151,20 +164,37 @@ export function ValuationApp() {
       form.frontage <= 50 &&
       form.roadWidth >= 1 &&
       form.roadWidth <= 120 &&
-      (locMode === "pin" || form.address.trim().length > 3)
+      form.lat !== null &&
+      form.lng !== null
     );
   }, [form, locMode]);
 
   const handleValuate = async () => {
-    if (!valid) return;
+    if (!valid || form.lat === null || form.lng === null) {
+      toast.error("Chưa đủ dữ liệu", { description: "Vui lòng nhập địa chỉ hợp lệ để lấy toạ độ." });
+      return;
+    }
     setLoading(true);
     try {
-      const r = await mockValuationAPI(form);
+      const r = await callValuationAPI({
+        lat: form.lat,
+        lon: form.lng,
+        area: form.area,
+        floors: form.floors,
+        frontage: form.frontage,
+        road_width: form.roadWidth,
+        bedrooms: form.bedrooms,
+        bathrooms: form.bathrooms,
+      });
       setResult(r);
+      toast.success("Định giá thành công");
       // scroll to result on mobile
       setTimeout(() => {
         document.getElementById("valuation-output")?.scrollIntoView({ behavior: "smooth", block: "start" });
       }, 100);
+    } catch (e) {
+      const msg = (e as Error).message || "Không thể kết nối máy chủ định giá";
+      toast.error("Định giá thất bại", { description: msg });
     } finally {
       setLoading(false);
     }
@@ -185,6 +215,7 @@ export function ValuationApp() {
               onAddress={(v) => update("address", v)}
               lat={form.lat}
               lng={form.lng}
+              geo={geo}
             />
             <AttributesCard form={form} update={update} />
             <Button
@@ -201,7 +232,7 @@ export function ValuationApp() {
               ) : (
                 <>
                   <Sparkles className="mr-2 h-5 w-5" />
-                  ĐỊNH GIÁ TÀI SẢN
+                  ĐỊNH GIÁ NGAY
                 </>
               )}
             </Button>
