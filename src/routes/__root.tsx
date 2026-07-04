@@ -81,9 +81,13 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
       { name: "description", content: "Nền tảng định giá bất động sản ứng dụng AI: giá trị thị trường, điểm không gian, giải thích SHAP và so sánh giao dịch tương đồng." },
       { name: "author", content: "PropValue AI" },
       { property: "og:title", content: "PropValue AI — Định giá bất động sản chuyên nghiệp" },
-      { property: "og:description", content: "Định giá tài sản với AI: giá trị thị trường, khoảng giá, điểm vị trí và phân tích các yếu tố ảnh hưởng." },
+      { property: "og:description", content: "Nền tảng định giá bất động sản ứng dụng AI: giá trị thị trường, điểm không gian, giải thích SHAP và so sánh giao dịch tương đồng." },
       { property: "og:type", content: "website" },
       { name: "twitter:card", content: "summary_large_image" },
+      { name: "twitter:title", content: "PropValue AI — Định giá bất động sản chuyên nghiệp" },
+      { name: "twitter:description", content: "Nền tảng định giá bất động sản ứng dụng AI: giá trị thị trường, điểm không gian, giải thích SHAP và so sánh giao dịch tương đồng." },
+      { property: "og:image", content: "https://pub-bb2e103a32db4e198524a2e9ed8f35b4.r2.dev/68fd88f4-92f4-4ec1-98a7-4a004ea6c909/id-preview-08e79574--bda60cb9-f4f4-4b58-b73e-e46ae9409927.lovable.app-1783154146028.png" },
+      { name: "twitter:image", content: "https://pub-bb2e103a32db4e198524a2e9ed8f35b4.r2.dev/68fd88f4-92f4-4ec1-98a7-4a004ea6c909/id-preview-08e79574--bda60cb9-f4f4-4b58-b73e-e46ae9409927.lovable.app-1783154146028.png" },
     ],
     links: [
       {
