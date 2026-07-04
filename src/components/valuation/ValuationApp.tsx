@@ -739,15 +739,14 @@ function ResultDashboard({ result }: { result: ValuationResult }) {
     <div className="grid grid-cols-1 gap-5 md:grid-cols-2">
       <CommercialValueCard result={result} />
       <SpatialScoreCard score={result.score} />
-      <ShapCard shap={result.shap} />
-      <CompsCard comps={result.comps} />
+      <div className="md:col-span-2">
+        <ShapCard shap={result.shap} />
+      </div>
     </div>
   );
 }
 
 function CommercialValueCard({ result }: { result: ValuationResult }) {
-  const range = result.max - result.min;
-  const pos = ((result.total - result.min) / range) * 100;
   return (
     <Card className="relative overflow-hidden border-transparent bg-[image:var(--gradient-value)] p-6 text-primary-foreground shadow-[var(--shadow-elevated)] md:col-span-2">
       <div className="absolute -right-16 -top-16 h-56 w-56 rounded-full bg-primary-glow/30 blur-3xl" />
@@ -757,43 +756,22 @@ function CommercialValueCard({ result }: { result: ValuationResult }) {
             <TrendingUp className="h-3.5 w-3.5" />
             Tổng giá trị tài sản
           </div>
-          <Badge className="border-white/20 bg-white/10 text-primary-foreground hover:bg-white/15" variant="outline">
-            Độ tin cậy 92%
-          </Badge>
         </div>
 
         <div className="mt-3 flex items-end gap-3">
           <div className="text-5xl font-black leading-none tracking-tight sm:text-6xl">
             {VND(result.total)}
           </div>
-          <div className="pb-2 text-sm text-primary-foreground/70">VND</div>
+          <div className="pb-2 text-sm text-primary-foreground/70">VNĐ</div>
         </div>
 
         <div className="mt-3 flex flex-wrap items-center gap-x-6 gap-y-1 text-sm text-primary-foreground/85">
           <div>
             <span className="text-primary-foreground/60">Đơn giá: </span>
-            <span className="font-semibold">{VND(result.unit)}/m²</span>
+            <span className="font-semibold">{VND(result.unit)} VNĐ/m²</span>
           </div>
-        </div>
-
-        <div className="mt-6">
-          <div className="mb-2 flex items-center justify-between text-xs text-primary-foreground/70">
-            <span>Khoảng giá thị trường</span>
-            <span className="font-mono">
-              {VND(result.min)} – {VND(result.max)}
-            </span>
-          </div>
-          <div className="relative h-3 w-full overflow-hidden rounded-full bg-white/10">
-            <div className="absolute inset-y-0 left-[8%] right-[8%] rounded-full bg-gradient-to-r from-white/25 via-white/60 to-white/25" />
-            <div
-              className="absolute top-1/2 h-5 w-5 -translate-x-1/2 -translate-y-1/2 rounded-full bg-white shadow-[0_0_0_4px_oklch(1_0_0/0.2)]"
-              style={{ left: `${clamp(pos, 4, 96)}%` }}
-            />
-          </div>
-          <div className="mt-1.5 flex justify-between text-[10px] text-primary-foreground/60">
-            <span>Min</span>
-            <span>Định giá</span>
-            <span>Max</span>
+          <div className="font-mono text-xs text-primary-foreground/60">
+            {result.total.toLocaleString("vi-VN")} ₫
           </div>
         </div>
       </div>
