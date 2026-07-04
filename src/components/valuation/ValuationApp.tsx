@@ -318,13 +318,15 @@ function LocationCard({
   onAddress,
   lat,
   lng,
+  geo,
 }: {
   mode: LocationMode;
   setMode: (m: LocationMode) => void;
   address: string;
   onAddress: (v: string) => void;
-  lat: number;
-  lng: number;
+  lat: number | null;
+  lng: number | null;
+  geo: GeoStatus;
 }) {
   return (
     <Card className="border-border/60 p-5 shadow-[var(--shadow-card)]">
@@ -373,11 +375,46 @@ function LocationCard({
             placeholder="Số nhà, đường, phường/xã, quận/huyện, tỉnh/thành phố"
             className="h-11 border-border bg-background"
           />
+          <GeoIndicator geo={geo} />
         </div>
       ) : (
-        <MapPlaceholder lat={lat} lng={lng} label="Kéo ghim để chọn vị trí chính xác" />
+        <MapPlaceholder lat={lat ?? 0} lng={lng ?? 0} label="Kéo ghim để chọn vị trí chính xác" />
       )}
     </Card>
+  );
+}
+
+function GeoIndicator({ geo }: { geo: GeoStatus }) {
+  if (geo.kind === "idle") {
+    return (
+      <p className="text-[11px] text-muted-foreground">
+        Nhập địa chỉ để tự động lấy toạ độ (OpenStreetMap).
+      </p>
+    );
+  }
+  if (geo.kind === "loading") {
+    return (
+      <p className="inline-flex items-center gap-1.5 text-[11px] text-muted-foreground">
+        <Loader2 className="h-3 w-3 animate-spin" /> Đang tra cứu toạ độ…
+      </p>
+    );
+  }
+  if (geo.kind === "success") {
+    return (
+      <div className="rounded-md border border-success/30 bg-success/10 px-2.5 py-1.5 text-[11px] text-success">
+        <div className="flex items-center gap-1.5 font-medium">
+          <CheckCircle2 className="h-3.5 w-3.5" />
+          Đã tìm thấy toạ độ · {geo.lat.toFixed(5)}, {geo.lon.toFixed(5)}
+        </div>
+        <div className="mt-0.5 truncate text-[10px] text-success/80">{geo.display}</div>
+      </div>
+    );
+  }
+  return (
+    <div className="inline-flex items-center gap-1.5 rounded-md border border-destructive/30 bg-destructive/10 px-2.5 py-1.5 text-[11px] font-medium text-destructive">
+      <AlertCircle className="h-3.5 w-3.5" />
+      {geo.message}
+    </div>
   );
 }
 
