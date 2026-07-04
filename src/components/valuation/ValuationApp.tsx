@@ -836,19 +836,6 @@ function SpatialScoreCard({ score }: { score: number }) {
         </div>
         <p className="text-sm leading-relaxed text-foreground">{message}</p>
       </div>
-
-      <div className="mt-5 grid grid-cols-3 gap-2 text-center">
-        {[
-          { k: "Trường học", v: "8" },
-          { k: "Bệnh viện", v: "3" },
-          { k: "Trung tâm TM", v: "5" },
-        ].map((s) => (
-          <div key={s.k} className="rounded-md bg-slate-surface p-2">
-            <div className="text-lg font-bold text-foreground">{s.v}</div>
-            <div className="text-[10px] text-muted-foreground">{s.k}</div>
-          </div>
-        ))}
-      </div>
     </Card>
   );
 }
