@@ -1,5 +1,6 @@
-import { useMemo, useState } from "react";
-import { Building2, MapPin, Type, Loader2, Sparkles, TrendingUp, TrendingDown, Home, Ruler, Layers, DoorOpen, Bath, BedDouble, ArrowRight } from "lucide-react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { Building2, MapPin, Type, Loader2, Sparkles, TrendingUp, TrendingDown, Home, Ruler, Layers, DoorOpen, Bath, BedDouble, CheckCircle2, AlertCircle } from "lucide-react";
+import { toast } from "sonner";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -7,22 +8,13 @@ import { Label } from "@/components/ui/label";
 import { Slider } from "@/components/ui/slider";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
-import {
-  BarChart,
-  Bar,
-  XAxis,
-  YAxis,
-  Cell,
-  ResponsiveContainer,
-  Tooltip as ReTooltip,
-} from "recharts";
 
 type LocationMode = "text" | "pin";
 
 interface FormState {
   address: string;
-  lat: number;
-  lng: number;
+  lat: number | null;
+  lng: number | null;
   area: number;
   floors: number;
   frontage: number;
@@ -36,23 +28,18 @@ interface ShapFactor {
   impact: number; // percent, +/-
 }
 
-interface Comp {
-  address: string;
-  area: number;
-  price: number; // VND
-  date: string;
-  distance: number; // km
-}
-
 interface ValuationResult {
   total: number; // VND
   unit: number; // VND / m²
-  min: number;
-  max: number;
   score: number; // 0-100
   shap: ShapFactor[];
-  comps: Comp[];
 }
+
+type GeoStatus =
+  | { kind: "idle" }
+  | { kind: "loading" }
+  | { kind: "success"; lat: number; lon: number; display: string }
+  | { kind: "error"; message: string };
 
 const VND = (v: number) => {
   if (v >= 1_000_000_000)
@@ -66,68 +53,56 @@ function clamp(v: number, min: number, max: number) {
   return Math.min(max, Math.max(min, v));
 }
 
-async function mockValuationAPI(input: FormState): Promise<ValuationResult> {
-  // Simulated REST call — swap with real endpoint later.
-  await new Promise((r) => setTimeout(r, 1400));
+const VALUATION_ENDPOINT = "http://localhost:8000/api/v1/valuate";
 
-  const basePerM2 = 110_000_000; // 110tr/m²
-  const locationFactor = 1 + (Math.sin(input.lat * 12.7 + input.lng * 9.3) * 0.15);
-  const floorsBoost = 1 + (input.floors - 1) * 0.045;
-  const frontageBoost = 1 + clamp((input.frontage - 4) / 20, -0.1, 0.35);
-  const roadBoost = 1 + clamp((input.roadWidth - 6) / 60, -0.08, 0.28);
-  const roomBoost = 1 + (input.bedrooms + input.bathrooms) * 0.008;
+async function callValuationAPI(input: {
+  lat: number;
+  lon: number;
+  area: number;
+  floors: number;
+  frontage: number;
+  road_width: number;
+  bedrooms: number;
+  bathrooms: number;
+}): Promise<ValuationResult> {
+  const res = await fetch(VALUATION_ENDPOINT, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  });
 
-  const unit = Math.round(basePerM2 * locationFactor * frontageBoost * roadBoost);
-  const total = Math.round(unit * input.area * floorsBoost * roomBoost);
-  const min = Math.round(total * 0.91);
-  const max = Math.round(total * 1.09);
+  if (!res.ok) {
+    let detail = `${res.status} ${res.statusText}`;
+    try {
+      const err = await res.json();
+      if (err?.detail) {
+        detail = typeof err.detail === "string" ? err.detail : JSON.stringify(err.detail);
+      }
+    } catch {
+      /* ignore */
+    }
+    throw new Error(detail);
+  }
 
-  const score = Math.round(
-    clamp(55 + (locationFactor - 1) * 200 + input.roadWidth * 0.4 + input.frontage * 0.6, 20, 98),
-  );
-
+  const data = await res.json();
+  const total = Number(data?.valuation?.total_price_vnd ?? 0);
+  const unit = Number(data?.valuation?.unit_price_vnd ?? 0);
+  const score = Math.round(Number(data?.spatial_insights?.score_100 ?? 0));
+  const shapley = data?.shapley ?? {};
   const shap: ShapFactor[] = [
-    { label: "Vị trí không gian", impact: Math.round((locationFactor - 1) * 100) },
-    { label: "Mặt tiền rộng", impact: Math.round((frontageBoost - 1) * 100) },
-    { label: "Đường trước nhà", impact: Math.round((roadBoost - 1) * 100) },
-    { label: "Số tầng", impact: Math.round((floorsBoost - 1) * 100) },
-    { label: "Số phòng", impact: Math.round((roomBoost - 1) * 100) },
-    { label: "Tuổi công trình", impact: -Math.round(3 + Math.random() * 4) },
+    { label: "Diện tích", impact: Math.round(Number(shapley.area ?? 0) * 100) / 100 },
+    { label: "Vị trí không gian", impact: Math.round(Number(shapley.spatial ?? 0) * 100) / 100 },
   ].sort((a, b) => Math.abs(b.impact) - Math.abs(a.impact));
 
-  const comps: Comp[] = [
-    {
-      address: "12 Trần Hưng Đạo, Q.1",
-      area: input.area + 8,
-      price: Math.round(total * 1.04),
-      date: "03/2026",
-      distance: 0.4,
-    },
-    {
-      address: "45 Lê Lợi, Q.1",
-      area: input.area - 6,
-      price: Math.round(total * 0.93),
-      date: "11/2025",
-      distance: 0.7,
-    },
-    {
-      address: "88 Nguyễn Huệ, Q.1",
-      area: input.area + 2,
-      price: Math.round(total * 1.01),
-      date: "01/2026",
-      distance: 0.9,
-    },
-  ];
-
-  return { total, unit, min, max, score, shap, comps };
+  return { total, unit, score, shap };
 }
 
 export function ValuationApp() {
   const [locMode, setLocMode] = useState<LocationMode>("text");
   const [form, setForm] = useState<FormState>({
-    address: "23 Nguyễn Thị Minh Khai, Quận 1, TP.HCM",
-    lat: 10.7769,
-    lng: 106.7009,
+    address: "",
+    lat: null,
+    lng: null,
     area: 80,
     floors: 4,
     frontage: 5,
@@ -135,11 +110,49 @@ export function ValuationApp() {
     bedrooms: 3,
     bathrooms: 3,
   });
+  const [geo, setGeo] = useState<GeoStatus>({ kind: "idle" });
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<ValuationResult | null>(null);
 
   const update = <K extends keyof FormState>(k: K, v: FormState[K]) =>
     setForm((f) => ({ ...f, [k]: v }));
+
+  // Debounced geocoding via OpenStreetMap Nominatim
+  const geocodeSeq = useRef(0);
+  useEffect(() => {
+    if (locMode !== "text") return;
+    const q = form.address.trim();
+    if (q.length < 4) {
+      setGeo({ kind: "idle" });
+      setForm((f) => (f.lat === null && f.lng === null ? f : { ...f, lat: null, lng: null }));
+      return;
+    }
+    const seq = ++geocodeSeq.current;
+    setGeo({ kind: "loading" });
+    const t = setTimeout(async () => {
+      try {
+        const url = `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(q)}&format=json&limit=1`;
+        const res = await fetch(url, { headers: { Accept: "application/json" } });
+        if (!res.ok) throw new Error(`Geocoding ${res.status}`);
+        const arr = (await res.json()) as Array<{ lat: string; lon: string; display_name: string }>;
+        if (seq !== geocodeSeq.current) return;
+        if (!arr.length) {
+          setGeo({ kind: "error", message: "Không tìm thấy toạ độ cho địa chỉ này" });
+          setForm((f) => ({ ...f, lat: null, lng: null }));
+          return;
+        }
+        const lat = parseFloat(arr[0].lat);
+        const lon = parseFloat(arr[0].lon);
+        setGeo({ kind: "success", lat, lon, display: arr[0].display_name });
+        setForm((f) => ({ ...f, lat, lng: lon }));
+      } catch (e) {
+        if (seq !== geocodeSeq.current) return;
+        setGeo({ kind: "error", message: (e as Error).message || "Lỗi mã hoá địa chỉ" });
+        setForm((f) => ({ ...f, lat: null, lng: null }));
+      }
+    }, 600);
+    return () => clearTimeout(t);
+  }, [form.address, locMode]);
 
   const valid = useMemo(() => {
     return (
@@ -151,20 +164,37 @@ export function ValuationApp() {
       form.frontage <= 50 &&
       form.roadWidth >= 1 &&
       form.roadWidth <= 120 &&
-      (locMode === "pin" || form.address.trim().length > 3)
+      form.lat !== null &&
+      form.lng !== null
     );
   }, [form, locMode]);
 
   const handleValuate = async () => {
-    if (!valid) return;
+    if (!valid || form.lat === null || form.lng === null) {
+      toast.error("Chưa đủ dữ liệu", { description: "Vui lòng nhập địa chỉ hợp lệ để lấy toạ độ." });
+      return;
+    }
     setLoading(true);
     try {
-      const r = await mockValuationAPI(form);
+      const r = await callValuationAPI({
+        lat: form.lat,
+        lon: form.lng,
+        area: form.area,
+        floors: form.floors,
+        frontage: form.frontage,
+        road_width: form.roadWidth,
+        bedrooms: form.bedrooms,
+        bathrooms: form.bathrooms,
+      });
       setResult(r);
+      toast.success("Định giá thành công");
       // scroll to result on mobile
       setTimeout(() => {
         document.getElementById("valuation-output")?.scrollIntoView({ behavior: "smooth", block: "start" });
       }, 100);
+    } catch (e) {
+      const msg = (e as Error).message || "Không thể kết nối máy chủ định giá";
+      toast.error("Định giá thất bại", { description: msg });
     } finally {
       setLoading(false);
     }
@@ -185,6 +215,7 @@ export function ValuationApp() {
               onAddress={(v) => update("address", v)}
               lat={form.lat}
               lng={form.lng}
+              geo={geo}
             />
             <AttributesCard form={form} update={update} />
             <Button
@@ -201,7 +232,7 @@ export function ValuationApp() {
               ) : (
                 <>
                   <Sparkles className="mr-2 h-5 w-5" />
-                  ĐỊNH GIÁ TÀI SẢN
+                  ĐỊNH GIÁ NGAY
                 </>
               )}
             </Button>
@@ -287,13 +318,15 @@ function LocationCard({
   onAddress,
   lat,
   lng,
+  geo,
 }: {
   mode: LocationMode;
   setMode: (m: LocationMode) => void;
   address: string;
   onAddress: (v: string) => void;
-  lat: number;
-  lng: number;
+  lat: number | null;
+  lng: number | null;
+  geo: GeoStatus;
 }) {
   return (
     <Card className="border-border/60 p-5 shadow-[var(--shadow-card)]">
@@ -342,11 +375,46 @@ function LocationCard({
             placeholder="Số nhà, đường, phường/xã, quận/huyện, tỉnh/thành phố"
             className="h-11 border-border bg-background"
           />
+          <GeoIndicator geo={geo} />
         </div>
       ) : (
-        <MapPlaceholder lat={lat} lng={lng} label="Kéo ghim để chọn vị trí chính xác" />
+        <MapPlaceholder lat={lat ?? 0} lng={lng ?? 0} label="Kéo ghim để chọn vị trí chính xác" />
       )}
     </Card>
+  );
+}
+
+function GeoIndicator({ geo }: { geo: GeoStatus }) {
+  if (geo.kind === "idle") {
+    return (
+      <p className="text-[11px] text-muted-foreground">
+        Nhập địa chỉ để tự động lấy toạ độ (OpenStreetMap).
+      </p>
+    );
+  }
+  if (geo.kind === "loading") {
+    return (
+      <p className="inline-flex items-center gap-1.5 text-[11px] text-muted-foreground">
+        <Loader2 className="h-3 w-3 animate-spin" /> Đang tra cứu toạ độ…
+      </p>
+    );
+  }
+  if (geo.kind === "success") {
+    return (
+      <div className="rounded-md border border-success/30 bg-success/10 px-2.5 py-1.5 text-[11px] text-success">
+        <div className="flex items-center gap-1.5 font-medium">
+          <CheckCircle2 className="h-3.5 w-3.5" />
+          Đã tìm thấy toạ độ · {geo.lat.toFixed(5)}, {geo.lon.toFixed(5)}
+        </div>
+        <div className="mt-0.5 truncate text-[10px] text-success/80">{geo.display}</div>
+      </div>
+    );
+  }
+  return (
+    <div className="inline-flex items-center gap-1.5 rounded-md border border-destructive/30 bg-destructive/10 px-2.5 py-1.5 text-[11px] font-medium text-destructive">
+      <AlertCircle className="h-3.5 w-3.5" />
+      {geo.message}
+    </div>
   );
 }
 
@@ -671,15 +739,14 @@ function ResultDashboard({ result }: { result: ValuationResult }) {
     <div className="grid grid-cols-1 gap-5 md:grid-cols-2">
       <CommercialValueCard result={result} />
       <SpatialScoreCard score={result.score} />
-      <ShapCard shap={result.shap} />
-      <CompsCard comps={result.comps} />
+      <div className="md:col-span-2">
+        <ShapCard shap={result.shap} />
+      </div>
     </div>
   );
 }
 
 function CommercialValueCard({ result }: { result: ValuationResult }) {
-  const range = result.max - result.min;
-  const pos = ((result.total - result.min) / range) * 100;
   return (
     <Card className="relative overflow-hidden border-transparent bg-[image:var(--gradient-value)] p-6 text-primary-foreground shadow-[var(--shadow-elevated)] md:col-span-2">
       <div className="absolute -right-16 -top-16 h-56 w-56 rounded-full bg-primary-glow/30 blur-3xl" />
@@ -689,43 +756,22 @@ function CommercialValueCard({ result }: { result: ValuationResult }) {
             <TrendingUp className="h-3.5 w-3.5" />
             Tổng giá trị tài sản
           </div>
-          <Badge className="border-white/20 bg-white/10 text-primary-foreground hover:bg-white/15" variant="outline">
-            Độ tin cậy 92%
-          </Badge>
         </div>
 
         <div className="mt-3 flex items-end gap-3">
           <div className="text-5xl font-black leading-none tracking-tight sm:text-6xl">
             {VND(result.total)}
           </div>
-          <div className="pb-2 text-sm text-primary-foreground/70">VND</div>
+          <div className="pb-2 text-sm text-primary-foreground/70">VNĐ</div>
         </div>
 
         <div className="mt-3 flex flex-wrap items-center gap-x-6 gap-y-1 text-sm text-primary-foreground/85">
           <div>
             <span className="text-primary-foreground/60">Đơn giá: </span>
-            <span className="font-semibold">{VND(result.unit)}/m²</span>
+            <span className="font-semibold">{VND(result.unit)} VNĐ/m²</span>
           </div>
-        </div>
-
-        <div className="mt-6">
-          <div className="mb-2 flex items-center justify-between text-xs text-primary-foreground/70">
-            <span>Khoảng giá thị trường</span>
-            <span className="font-mono">
-              {VND(result.min)} – {VND(result.max)}
-            </span>
-          </div>
-          <div className="relative h-3 w-full overflow-hidden rounded-full bg-white/10">
-            <div className="absolute inset-y-0 left-[8%] right-[8%] rounded-full bg-gradient-to-r from-white/25 via-white/60 to-white/25" />
-            <div
-              className="absolute top-1/2 h-5 w-5 -translate-x-1/2 -translate-y-1/2 rounded-full bg-white shadow-[0_0_0_4px_oklch(1_0_0/0.2)]"
-              style={{ left: `${clamp(pos, 4, 96)}%` }}
-            />
-          </div>
-          <div className="mt-1.5 flex justify-between text-[10px] text-primary-foreground/60">
-            <span>Min</span>
-            <span>Định giá</span>
-            <span>Max</span>
+          <div className="font-mono text-xs text-primary-foreground/60">
+            {result.total.toLocaleString("vi-VN")} ₫
           </div>
         </div>
       </div>
@@ -790,19 +836,6 @@ function SpatialScoreCard({ score }: { score: number }) {
         </div>
         <p className="text-sm leading-relaxed text-foreground">{message}</p>
       </div>
-
-      <div className="mt-5 grid grid-cols-3 gap-2 text-center">
-        {[
-          { k: "Trường học", v: "8" },
-          { k: "Bệnh viện", v: "3" },
-          { k: "Trung tâm TM", v: "5" },
-        ].map((s) => (
-          <div key={s.k} className="rounded-md bg-slate-surface p-2">
-            <div className="text-lg font-bold text-foreground">{s.v}</div>
-            <div className="text-[10px] text-muted-foreground">{s.k}</div>
-          </div>
-        ))}
-      </div>
     </Card>
   );
 }
@@ -858,69 +891,6 @@ function ShapCard({ shap }: { shap: ShapFactor[] }) {
         })}
       </div>
 
-      {/* silence unused recharts warnings — reserved for future waterfall detail */}
-      <div className="hidden">
-        <ResponsiveContainer width="100%" height={0}>
-          <BarChart data={data}>
-            <XAxis dataKey="label" />
-            <YAxis />
-            <ReTooltip />
-            <Bar dataKey="impact">
-              {data.map((_, i) => (
-                <Cell key={i} />
-              ))}
-            </Bar>
-          </BarChart>
-        </ResponsiveContainer>
-      </div>
-    </Card>
-  );
-}
-
-function CompsCard({ comps }: { comps: Comp[] }) {
-  return (
-    <Card className="border-border/60 p-6 shadow-[var(--shadow-card)]">
-      <div className="mb-4 flex items-center justify-between">
-        <div>
-          <h3 className="text-sm font-semibold text-foreground">Giao dịch tương đồng</h3>
-          <p className="text-xs text-muted-foreground">15 điểm dữ liệu lịch sử lân cận</p>
-        </div>
-        <button className="inline-flex items-center gap-1 text-xs font-medium text-primary hover:underline">
-          Xem tất cả <ArrowRight className="h-3 w-3" />
-        </button>
-      </div>
-
-      <MapPlaceholder lat={10.7769} lng={106.7009} />
-
-      <div className="mt-4 overflow-hidden rounded-lg border border-border">
-        <table className="w-full text-xs">
-          <thead className="bg-slate-surface text-muted-foreground">
-            <tr>
-              <th className="px-3 py-2 text-left font-medium">Địa chỉ</th>
-              <th className="px-3 py-2 text-right font-medium">m²</th>
-              <th className="px-3 py-2 text-right font-medium">Giá</th>
-              <th className="hidden px-3 py-2 text-right font-medium sm:table-cell">Ngày</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-border">
-            {comps.map((c) => (
-              <tr key={c.address} className="bg-card transition-colors hover:bg-slate-surface/60">
-                <td className="px-3 py-2 font-medium text-foreground">
-                  <div className="truncate">{c.address}</div>
-                  <div className="text-[10px] text-muted-foreground">{c.distance} km</div>
-                </td>
-                <td className="px-3 py-2 text-right tabular-nums text-foreground">{c.area}</td>
-                <td className="px-3 py-2 text-right font-semibold tabular-nums text-foreground">
-                  {VND(c.price)}
-                </td>
-                <td className="hidden px-3 py-2 text-right tabular-nums text-muted-foreground sm:table-cell">
-                  {c.date}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
     </Card>
   );
 }
