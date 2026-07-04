@@ -77,14 +77,13 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
     meta: [
       { charSet: "utf-8" },
       { name: "viewport", content: "width=device-width, initial-scale=1" },
-      { title: "Lovable App" },
-      { name: "description", content: "Lovable Generated Project" },
-      { name: "author", content: "Lovable" },
-      { property: "og:title", content: "Lovable App" },
-      { property: "og:description", content: "Lovable Generated Project" },
+      { title: "PropValue AI — Định giá bất động sản chuyên nghiệp" },
+      { name: "description", content: "Nền tảng định giá bất động sản ứng dụng AI: giá trị thị trường, điểm không gian, giải thích SHAP và so sánh giao dịch tương đồng." },
+      { name: "author", content: "PropValue AI" },
+      { property: "og:title", content: "PropValue AI — Định giá bất động sản chuyên nghiệp" },
+      { property: "og:description", content: "Định giá tài sản với AI: giá trị thị trường, khoảng giá, điểm vị trí và phân tích các yếu tố ảnh hưởng." },
       { property: "og:type", content: "website" },
       { name: "twitter:card", content: "summary_large_image" },
-      { name: "twitter:site", content: "@Lovable" },
     ],
     links: [
       {
