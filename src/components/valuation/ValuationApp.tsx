@@ -904,69 +904,6 @@ function ShapCard({ shap }: { shap: ShapFactor[] }) {
         })}
       </div>
 
-      {/* silence unused recharts warnings — reserved for future waterfall detail */}
-      <div className="hidden">
-        <ResponsiveContainer width="100%" height={0}>
-          <BarChart data={data}>
-            <XAxis dataKey="label" />
-            <YAxis />
-            <ReTooltip />
-            <Bar dataKey="impact">
-              {data.map((_, i) => (
-                <Cell key={i} />
-              ))}
-            </Bar>
-          </BarChart>
-        </ResponsiveContainer>
-      </div>
-    </Card>
-  );
-}
-
-function CompsCard({ comps }: { comps: Comp[] }) {
-  return (
-    <Card className="border-border/60 p-6 shadow-[var(--shadow-card)]">
-      <div className="mb-4 flex items-center justify-between">
-        <div>
-          <h3 className="text-sm font-semibold text-foreground">Giao dịch tương đồng</h3>
-          <p className="text-xs text-muted-foreground">15 điểm dữ liệu lịch sử lân cận</p>
-        </div>
-        <button className="inline-flex items-center gap-1 text-xs font-medium text-primary hover:underline">
-          Xem tất cả <ArrowRight className="h-3 w-3" />
-        </button>
-      </div>
-
-      <MapPlaceholder lat={10.7769} lng={106.7009} />
-
-      <div className="mt-4 overflow-hidden rounded-lg border border-border">
-        <table className="w-full text-xs">
-          <thead className="bg-slate-surface text-muted-foreground">
-            <tr>
-              <th className="px-3 py-2 text-left font-medium">Địa chỉ</th>
-              <th className="px-3 py-2 text-right font-medium">m²</th>
-              <th className="px-3 py-2 text-right font-medium">Giá</th>
-              <th className="hidden px-3 py-2 text-right font-medium sm:table-cell">Ngày</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-border">
-            {comps.map((c) => (
-              <tr key={c.address} className="bg-card transition-colors hover:bg-slate-surface/60">
-                <td className="px-3 py-2 font-medium text-foreground">
-                  <div className="truncate">{c.address}</div>
-                  <div className="text-[10px] text-muted-foreground">{c.distance} km</div>
-                </td>
-                <td className="px-3 py-2 text-right tabular-nums text-foreground">{c.area}</td>
-                <td className="px-3 py-2 text-right font-semibold tabular-nums text-foreground">
-                  {VND(c.price)}
-                </td>
-                <td className="hidden px-3 py-2 text-right tabular-nums text-muted-foreground sm:table-cell">
-                  {c.date}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
     </Card>
   );
 }
