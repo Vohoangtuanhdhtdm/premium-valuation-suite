@@ -97,18 +97,17 @@ async function callValuationAPI(input: {
   return { total, unit, score, shap };
 }
 
-function cleanVietnameseAddress(input: string): string {
+function normalizeAddress(input: string): string {
   return input
-    .replace(/\bSố\s*\d+[A-Za-z]?(\/\d+[A-Za-z]?)*\b/gi, "")
-    .replace(/\bso\s*\d+[A-Za-z]?(\/\d+[A-Za-z]?)*\b/gi, "")
-    .replace(/\b(đường|duong|phố|pho|hẻm|hem|ngõ|ngo|ngách|ngach|kiệt|kiet)\b/gi, "")
-    .replace(/[,\s]+/g, " ")
-    .replace(/^[\s,]+|[\s,]+$/g, "")
+    .replace(/\b(HCMC|TP\.?\s*HCM|TPHCM)\b/gi, "Ho Chi Minh City")
+    .replace(/\bDistrict\s+([0-9]+|[A-Za-z]+)\b/gi, "Quận $1")
+    .replace(/\bWard\s+([0-9]+|[A-Za-z]+)\b/gi, "Phường $1")
+    .replace(/\s{2,}/g, " ")
     .trim();
 }
 
 async function nominatimSearch(q: string): Promise<Array<{ lat: string; lon: string; display_name: string }>> {
-  const url = `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(q)}&format=json&limit=1`;
+  const url = `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(q + ", Vietnam")}&format=json&limit=1`;
   const res = await fetch(url, { headers: { Accept: "application/json" } });
   if (!res.ok) throw new Error(`Geocoding ${res.status}`);
   return (await res.json()) as Array<{ lat: string; lon: string; display_name: string }>;
@@ -148,15 +147,15 @@ export function ValuationApp() {
     setGeo({ kind: "loading" });
     const t = setTimeout(async () => {
       try {
-        // Step 1 — raw query
+        // Attempt 1 — raw query + ", Vietnam"
         let arr = await nominatimSearch(q);
         if (seq !== geocodeSeq.current) return;
 
-        // Step 2/3 — fallback: strip Vietnamese prefixes and retry
+        // Attempt 2 — normalized (English → Vietnamese) fallback
         if (!arr.length) {
-          const cleaned = cleanVietnameseAddress(q);
-          if (cleaned && cleaned.toLowerCase() !== q.toLowerCase() && cleaned.length >= 3) {
-            arr = await nominatimSearch(cleaned);
+          const normalized = normalizeAddress(q);
+          if (normalized && normalized.toLowerCase() !== q.toLowerCase() && normalized.length >= 3) {
+            arr = await nominatimSearch(normalized);
             if (seq !== geocodeSeq.current) return;
           }
         }
