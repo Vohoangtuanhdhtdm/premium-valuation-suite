@@ -43,10 +43,10 @@ type GeoStatus =
 
 const VND = (v: number) => {
   if (v >= 1_000_000_000)
-    return `${(v / 1_000_000_000).toLocaleString("vi-VN", { maximumFractionDigits: 2 })} tỷ`;
+    return `${(v / 1_000_000_000).toLocaleString("en-US", { maximumFractionDigits: 2 })}B`;
   if (v >= 1_000_000)
-    return `${(v / 1_000_000).toLocaleString("vi-VN", { maximumFractionDigits: 1 })} triệu`;
-  return v.toLocaleString("vi-VN");
+    return `${(v / 1_000_000).toLocaleString("en-US", { maximumFractionDigits: 1 })}M`;
+  return v.toLocaleString("en-US");
 };
 
 function clamp(v: number, min: number, max: number) {
@@ -90,11 +90,28 @@ async function callValuationAPI(input: {
   const score = Math.round(Number(data?.spatial_insights?.score_100 ?? 0));
   const shapley = data?.shapley ?? {};
   const shap: ShapFactor[] = [
-    { label: "Diện tích", impact: Math.round(Number(shapley.area ?? 0) * 100) / 100 },
-    { label: "Vị trí không gian", impact: Math.round(Number(shapley.spatial ?? 0) * 100) / 100 },
+    { label: "Area", impact: Math.round(Number(shapley.area ?? 0) * 100) / 100 },
+    { label: "Spatial Location", impact: Math.round(Number(shapley.spatial ?? 0) * 100) / 100 },
   ].sort((a, b) => Math.abs(b.impact) - Math.abs(a.impact));
 
   return { total, unit, score, shap };
+}
+
+function cleanVietnameseAddress(input: string): string {
+  return input
+    .replace(/\bSố\s*\d+[A-Za-z]?(\/\d+[A-Za-z]?)*\b/gi, "")
+    .replace(/\bso\s*\d+[A-Za-z]?(\/\d+[A-Za-z]?)*\b/gi, "")
+    .replace(/\b(đường|duong|phố|pho|hẻm|hem|ngõ|ngo|ngách|ngach|kiệt|kiet)\b/gi, "")
+    .replace(/[,\s]+/g, " ")
+    .replace(/^[\s,]+|[\s,]+$/g, "")
+    .trim();
+}
+
+async function nominatimSearch(q: string): Promise<Array<{ lat: string; lon: string; display_name: string }>> {
+  const url = `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(q)}&format=json&limit=1`;
+  const res = await fetch(url, { headers: { Accept: "application/json" } });
+  if (!res.ok) throw new Error(`Geocoding ${res.status}`);
+  return (await res.json()) as Array<{ lat: string; lon: string; display_name: string }>;
 }
 
 export function ValuationApp() {
@@ -131,23 +148,32 @@ export function ValuationApp() {
     setGeo({ kind: "loading" });
     const t = setTimeout(async () => {
       try {
-        const url = `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(q)}&format=json&limit=1`;
-        const res = await fetch(url, { headers: { Accept: "application/json" } });
-        if (!res.ok) throw new Error(`Geocoding ${res.status}`);
-        const arr = (await res.json()) as Array<{ lat: string; lon: string; display_name: string }>;
+        // Step 1 — raw query
+        let arr = await nominatimSearch(q);
         if (seq !== geocodeSeq.current) return;
+
+        // Step 2/3 — fallback: strip Vietnamese prefixes and retry
         if (!arr.length) {
-          setGeo({ kind: "error", message: "Không tìm thấy toạ độ cho địa chỉ này" });
+          const cleaned = cleanVietnameseAddress(q);
+          if (cleaned && cleaned.toLowerCase() !== q.toLowerCase() && cleaned.length >= 3) {
+            arr = await nominatimSearch(cleaned);
+            if (seq !== geocodeSeq.current) return;
+          }
+        }
+
+        if (!arr.length) {
+          setGeo({ kind: "error", message: "Unable to locate address. Please use Map Pin." });
           setForm((f) => ({ ...f, lat: null, lng: null }));
           return;
         }
+
         const lat = parseFloat(arr[0].lat);
         const lon = parseFloat(arr[0].lon);
         setGeo({ kind: "success", lat, lon, display: arr[0].display_name });
         setForm((f) => ({ ...f, lat, lng: lon }));
       } catch (e) {
         if (seq !== geocodeSeq.current) return;
-        setGeo({ kind: "error", message: (e as Error).message || "Lỗi mã hoá địa chỉ" });
+        setGeo({ kind: "error", message: "Unable to locate address. Please use Map Pin." });
         setForm((f) => ({ ...f, lat: null, lng: null }));
       }
     }, 600);
@@ -171,7 +197,7 @@ export function ValuationApp() {
 
   const handleValuate = async () => {
     if (!valid || form.lat === null || form.lng === null) {
-      toast.error("Chưa đủ dữ liệu", { description: "Vui lòng nhập địa chỉ hợp lệ để lấy toạ độ." });
+      toast.error("Missing data", { description: "Please enter a valid address to resolve coordinates." });
       return;
     }
     setLoading(true);
@@ -187,14 +213,14 @@ export function ValuationApp() {
         bathrooms: form.bathrooms,
       });
       setResult(r);
-      toast.success("Định giá thành công");
+      toast.success("Valuation completed");
       // scroll to result on mobile
       setTimeout(() => {
         document.getElementById("valuation-output")?.scrollIntoView({ behavior: "smooth", block: "start" });
       }, 100);
     } catch (e) {
-      const msg = (e as Error).message || "Không thể kết nối máy chủ định giá";
-      toast.error("Định giá thất bại", { description: msg });
+      const msg = (e as Error).message || "Could not reach the valuation service";
+      toast.error("Valuation failed", { description: msg });
     } finally {
       setLoading(false);
     }
@@ -227,17 +253,17 @@ export function ValuationApp() {
               {loading ? (
                 <>
                   <Loader2 className="mr-2 h-5 w-5 animate-spin" />
-                  Đang phân tích dữ liệu…
+                  Analyzing data…
                 </>
               ) : (
                 <>
                   <Sparkles className="mr-2 h-5 w-5" />
-                  ĐỊNH GIÁ NGAY
+                  VALUATE PROPERTY
                 </>
               )}
             </Button>
             <p className="text-center text-xs text-muted-foreground">
-              Dữ liệu bảo mật · Sử dụng mô hình định giá AI kết hợp giao dịch thực tế
+              Secure data · AI valuation model powered by real transaction records
             </p>
           </section>
 
@@ -253,7 +279,7 @@ export function ValuationApp() {
       </main>
       <footer className="border-t border-border bg-card/50 py-6">
         <div className="mx-auto max-w-[1400px] px-4 text-center text-xs text-muted-foreground sm:px-6 lg:px-8">
-          © 2026 PropValue AI · Mô hình định giá phục vụ mục đích tham khảo trong hoạt động ngân hàng và bất động sản
+          © 2026 PropValue AI · Valuation model provided for reference in banking and real estate use cases
         </div>
       </footer>
     </div>
@@ -278,8 +304,8 @@ function TopNav() {
           </div>
         </div>
         <div className="hidden items-center gap-6 sm:flex">
-          <a className="text-sm font-medium text-muted-foreground transition-colors hover:text-foreground" href="#">Định giá</a>
-          <a className="text-sm font-medium text-muted-foreground transition-colors hover:text-foreground" href="#">Báo cáo</a>
+          <a className="text-sm font-medium text-muted-foreground transition-colors hover:text-foreground" href="#">Valuation</a>
+          <a className="text-sm font-medium text-muted-foreground transition-colors hover:text-foreground" href="#">Reports</a>
           <a className="text-sm font-medium text-muted-foreground transition-colors hover:text-foreground" href="#">API</a>
           <Badge className="border-success/30 bg-success/10 text-success hover:bg-success/15" variant="outline">
             <span className="mr-1 inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-success" />
@@ -295,13 +321,13 @@ function Header() {
   return (
     <div className="max-w-3xl">
       <Badge variant="outline" className="mb-3 border-primary/20 bg-primary/5 text-primary">
-        Định giá tài sản theo thời gian thực
+        Real-time Property Valuation
       </Badge>
       <h1 className="text-3xl font-bold tracking-tight text-foreground sm:text-4xl">
-        Xác định giá trị chính xác cho bất động sản của bạn
+        Accurate Property Valuation
       </h1>
       <p className="mt-3 text-base text-muted-foreground">
-        Mô hình học máy phân tích hơn 40 yếu tố về vị trí, hạ tầng và giao dịch tương đồng để đưa ra khoảng giá tin cậy cho mục đích thế chấp, mua bán và đầu tư.
+        Our machine learning model analyzes over 40 spatial and structural features — location, infrastructure, and comparable transactions — to produce a trusted price range for mortgage, sale, and investment decisions.
       </p>
     </div>
   );
@@ -335,7 +361,7 @@ function LocationCard({
           <div className="grid h-8 w-8 place-items-center rounded-md bg-primary/10 text-primary">
             <MapPin className="h-4 w-4" />
           </div>
-          <h2 className="text-base font-semibold text-foreground">Vị trí tài sản</h2>
+          <h2 className="text-base font-semibold text-foreground">Property Location</h2>
         </div>
         <div className="inline-flex rounded-lg border border-border bg-muted p-0.5">
           <button
@@ -347,7 +373,7 @@ function LocationCard({
             }`}
           >
             <Type className="h-3.5 w-3.5" />
-            Địa chỉ
+            Address
           </button>
           <button
             onClick={() => setMode("pin")}
@@ -358,7 +384,7 @@ function LocationCard({
             }`}
           >
             <MapPin className="h-3.5 w-3.5" />
-            Ghim bản đồ
+            Map Pin
           </button>
         </div>
       </div>
@@ -366,19 +392,19 @@ function LocationCard({
       {mode === "text" ? (
         <div className="space-y-2">
           <Label htmlFor="address" className="text-xs font-medium text-muted-foreground">
-            Địa chỉ đầy đủ
+            Full Address
           </Label>
           <Input
             id="address"
             value={address}
             onChange={(e) => onAddress(e.target.value)}
-            placeholder="Số nhà, đường, phường/xã, quận/huyện, tỉnh/thành phố"
+            placeholder="Street number, street, ward, district, city"
             className="h-11 border-border bg-background"
           />
           <GeoIndicator geo={geo} />
         </div>
       ) : (
-        <MapPlaceholder lat={lat ?? 0} lng={lng ?? 0} label="Kéo ghim để chọn vị trí chính xác" />
+        <MapPlaceholder lat={lat ?? 0} lng={lng ?? 0} label="Drag the pin to set exact location" />
       )}
     </Card>
   );
@@ -388,14 +414,14 @@ function GeoIndicator({ geo }: { geo: GeoStatus }) {
   if (geo.kind === "idle") {
     return (
       <p className="text-[11px] text-muted-foreground">
-        Nhập địa chỉ để tự động lấy toạ độ (OpenStreetMap).
+        Enter an address to auto-resolve coordinates (OpenStreetMap).
       </p>
     );
   }
   if (geo.kind === "loading") {
     return (
       <p className="inline-flex items-center gap-1.5 text-[11px] text-muted-foreground">
-        <Loader2 className="h-3 w-3 animate-spin" /> Đang tra cứu toạ độ…
+        <Loader2 className="h-3 w-3 animate-spin" /> Resolving coordinates…
       </p>
     );
   }
@@ -404,7 +430,7 @@ function GeoIndicator({ geo }: { geo: GeoStatus }) {
       <div className="rounded-md border border-success/30 bg-success/10 px-2.5 py-1.5 text-[11px] text-success">
         <div className="flex items-center gap-1.5 font-medium">
           <CheckCircle2 className="h-3.5 w-3.5" />
-          Đã tìm thấy toạ độ · {geo.lat.toFixed(5)}, {geo.lon.toFixed(5)}
+          Coordinates found · {geo.lat.toFixed(5)}, {geo.lon.toFixed(5)}
         </div>
         <div className="mt-0.5 truncate text-[10px] text-success/80">{geo.display}</div>
       </div>
@@ -493,7 +519,7 @@ function AttributesCard({
         <div className="grid h-8 w-8 place-items-center rounded-md bg-primary/10 text-primary">
           <Home className="h-4 w-4" />
         </div>
-        <h2 className="text-base font-semibold text-foreground">Đặc điểm tài sản</h2>
+        <h2 className="text-base font-semibold text-foreground">Property Characteristics</h2>
       </div>
 
       <div className="space-y-6">
@@ -501,7 +527,7 @@ function AttributesCard({
         <div>
           <div className="mb-2 flex items-center justify-between">
             <Label className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
-              <Ruler className="h-3.5 w-3.5" /> Diện tích (m²)
+              <Ruler className="h-3.5 w-3.5" /> Area (m²)
             </Label>
             <NumberInline
               value={form.area}
@@ -528,7 +554,7 @@ function AttributesCard({
 
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
           <NumField
-            label="Số tầng"
+            label="Floors"
             icon={<Layers className="h-3.5 w-3.5" />}
             value={form.floors}
             min={1}
@@ -536,7 +562,7 @@ function AttributesCard({
             onChange={(v) => update("floors", v)}
           />
           <NumField
-            label="Mặt tiền (m)"
+            label="Frontage (m)"
             icon={<DoorOpen className="h-3.5 w-3.5" />}
             value={form.frontage}
             min={1}
@@ -545,7 +571,7 @@ function AttributesCard({
             onChange={(v) => update("frontage", v)}
           />
           <NumField
-            label="Đường trước (m)"
+            label="Road Width (m)"
             icon={<Ruler className="h-3.5 w-3.5" />}
             value={form.roadWidth}
             min={1}
@@ -559,7 +585,7 @@ function AttributesCard({
 
         <div className="grid grid-cols-2 gap-4">
           <Stepper
-            label="Phòng ngủ"
+            label="Bedrooms"
             icon={<BedDouble className="h-3.5 w-3.5" />}
             value={form.bedrooms}
             min={0}
@@ -567,7 +593,7 @@ function AttributesCard({
             onChange={(v) => update("bedrooms", v)}
           />
           <Stepper
-            label="Phòng tắm"
+            label="Bathrooms"
             icon={<Bath className="h-3.5 w-3.5" />}
             value={form.bathrooms}
             min={0}
@@ -672,7 +698,7 @@ function Stepper({
           onClick={() => onChange(clamp(value - 1, min, max))}
           className="grid h-8 w-8 place-items-center rounded-md text-lg font-semibold text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:opacity-40"
           disabled={value <= min}
-          aria-label={`Giảm ${label}`}
+          aria-label={`Decrease ${label}`}
         >
           −
         </button>
@@ -682,7 +708,7 @@ function Stepper({
           onClick={() => onChange(clamp(value + 1, min, max))}
           className="grid h-8 w-8 place-items-center rounded-md text-lg font-semibold text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:opacity-40"
           disabled={value >= max}
-          aria-label={`Tăng ${label}`}
+          aria-label={`Increase ${label}`}
         >
           +
         </button>
@@ -708,20 +734,20 @@ function EmptyState({ loading }: { loading: boolean }) {
         </div>
       </div>
       <h3 className="mt-5 text-lg font-semibold text-foreground">
-        {loading ? "Đang phân tích bất động sản…" : "Kết quả định giá sẽ hiển thị tại đây"}
+        {loading ? "Analyzing property…" : "Valuation results will appear here"}
       </h3>
       <p className="mt-2 max-w-md text-sm text-muted-foreground">
         {loading
-          ? "Hệ thống đang so sánh với hàng nghìn giao dịch gần đây, tính toán điểm vị trí và các yếu tố ảnh hưởng."
-          : "Điền thông tin tài sản ở cột bên trái và nhấn “Định giá tài sản” để nhận báo cáo chi tiết bao gồm giá trị thương mại, điểm không gian, phân tích SHAP và giao dịch tương đồng."}
+          ? "Comparing against thousands of recent transactions, scoring location, and computing feature impact."
+          : "Fill in the property details on the left and click “Valuate Property” to receive a detailed report including market value, spatial score, SHAP analysis, and comparable transactions."}
       </p>
       {!loading && (
         <div className="mt-6 grid w-full max-w-md grid-cols-2 gap-3">
           {[
-            { k: "Giá trị thương mại", v: "Total & Unit" },
-            { k: "Điểm vị trí", v: "0 – 100" },
-            { k: "Giải thích AI", v: "SHAP factors" },
-            { k: "Comparable Sales", v: "15 lân cận" },
+            { k: "Market Value", v: "Total & Unit" },
+            { k: "Location Score", v: "0 – 100" },
+            { k: "AI Explainability", v: "SHAP factors" },
+            { k: "Comparable Sales", v: "15 nearby" },
           ].map((it) => (
             <div key={it.k} className="rounded-lg border border-border bg-background/60 p-3 text-left">
               <div className="text-[10px] uppercase tracking-wider text-muted-foreground">{it.k}</div>
@@ -754,7 +780,7 @@ function CommercialValueCard({ result }: { result: ValuationResult }) {
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2 text-xs uppercase tracking-[0.15em] text-primary-foreground/70">
             <TrendingUp className="h-3.5 w-3.5" />
-            Tổng giá trị tài sản
+            Estimated Total Value
           </div>
         </div>
 
@@ -762,16 +788,16 @@ function CommercialValueCard({ result }: { result: ValuationResult }) {
           <div className="text-5xl font-black leading-none tracking-tight sm:text-6xl">
             {VND(result.total)}
           </div>
-          <div className="pb-2 text-sm text-primary-foreground/70">VNĐ</div>
+          <div className="pb-2 text-sm text-primary-foreground/70">VND</div>
         </div>
 
         <div className="mt-3 flex flex-wrap items-center gap-x-6 gap-y-1 text-sm text-primary-foreground/85">
           <div>
-            <span className="text-primary-foreground/60">Đơn giá: </span>
-            <span className="font-semibold">{VND(result.unit)} VNĐ/m²</span>
+            <span className="text-primary-foreground/60">Unit Price: </span>
+            <span className="font-semibold">{VND(result.unit)} VND/m²</span>
           </div>
           <div className="font-mono text-xs text-primary-foreground/60">
-            {result.total.toLocaleString("vi-VN")} ₫
+            {result.total.toLocaleString("en-US")} ₫
           </div>
         </div>
       </div>
@@ -787,21 +813,21 @@ function SpatialScoreCard({ score }: { score: number }) {
   const dash = (score / 100) * c;
   const good = score > 70;
   const message = good
-    ? "Vị trí đắc địa, hưởng lợi lớn từ tiện ích xung quanh."
+    ? "Prime location with strong benefit from surrounding amenities."
     : score > 45
-    ? "Vị trí tốt, thuận tiện cho sinh hoạt và giao thương."
-    : "Vị trí bình thường, tiềm năng khai thác vừa phải.";
+    ? "Good location, convenient for daily life and commerce."
+    : "Average location with moderate development potential.";
   const color = good ? "var(--success)" : score > 45 ? "var(--primary-glow)" : "var(--warning)";
   return (
     <Card className="border-border/60 p-6 shadow-[var(--shadow-card)]">
       <div className="flex items-center justify-between">
         <div>
-          <h3 className="text-sm font-semibold text-foreground">Điểm không gian (Spatial Premium)</h3>
-          <p className="text-xs text-muted-foreground">Tiện ích, hạ tầng, kết nối giao thông</p>
+          <h3 className="text-sm font-semibold text-foreground">Spatial Premium Score</h3>
+          <p className="text-xs text-muted-foreground">Amenities, infrastructure, and transport connectivity</p>
         </div>
         {good && (
           <Badge className="border-success/30 bg-success/10 text-success" variant="outline">
-            Đắc địa
+            Prime
           </Badge>
         )}
       </div>
@@ -847,12 +873,12 @@ function ShapCard({ shap }: { shap: ShapFactor[] }) {
     <Card className="border-border/60 p-6 shadow-[var(--shadow-card)]">
       <div className="mb-4 flex items-center justify-between">
         <div>
-          <h3 className="text-sm font-semibold text-foreground">Yếu tố ảnh hưởng giá (SHAP)</h3>
-          <p className="text-xs text-muted-foreground">Đóng góp của từng đặc trưng vào giá trị</p>
+          <h3 className="text-sm font-semibold text-foreground">Price Impact Factors (SHAP)</h3>
+          <p className="text-xs text-muted-foreground">Contribution of each feature to the final value</p>
         </div>
         <div className="flex items-center gap-3 text-[10px] text-muted-foreground">
-          <span className="flex items-center gap-1"><span className="h-2 w-2 rounded-sm bg-success" /> Tăng</span>
-          <span className="flex items-center gap-1"><span className="h-2 w-2 rounded-sm bg-destructive" /> Giảm</span>
+          <span className="flex items-center gap-1"><span className="h-2 w-2 rounded-sm bg-success" /> Increase</span>
+          <span className="flex items-center gap-1"><span className="h-2 w-2 rounded-sm bg-destructive" /> Decrease</span>
         </div>
       </div>
 
