@@ -449,6 +449,7 @@ function LocationCard({
   lat,
   lng,
   geo,
+  onPinChange,
 }: {
   mode: LocationMode;
   setMode: (m: LocationMode) => void;
@@ -457,6 +458,7 @@ function LocationCard({
   lat: number | null;
   lng: number | null;
   geo: GeoStatus;
+  onPinChange: (lat: number, lng: number) => void;
 }) {
   return (
     <Card className="border-border/60 p-5 shadow-[var(--shadow-card)]">
@@ -508,7 +510,28 @@ function LocationCard({
           <GeoIndicator geo={geo} />
         </div>
       ) : (
-        <MapPlaceholder lat={lat ?? 0} lng={lng ?? 0} label="Drag the pin to set exact location" />
+        <div className="space-y-2">
+          <div className="relative h-72 w-full overflow-hidden rounded-lg border border-border bg-slate-surface">
+            <Suspense
+              fallback={
+                <div className="grid h-full w-full place-items-center text-xs text-muted-foreground">
+                  <span className="inline-flex items-center gap-1.5">
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" /> Loading map…
+                  </span>
+                </div>
+              }
+            >
+              <MapPicker lat={lat} lng={lng} onChange={onPinChange} />
+            </Suspense>
+            <div className="pointer-events-none absolute bottom-2 left-2 z-[400] rounded-md bg-card/95 px-2 py-1 font-mono text-[10px] text-muted-foreground shadow-sm ring-1 ring-border">
+              {(lat ?? 0).toFixed(5)}, {(lng ?? 0).toFixed(5)}
+            </div>
+            <div className="pointer-events-none absolute bottom-2 right-2 z-[400] rounded-md bg-card/95 px-2 py-1 text-[10px] font-medium text-muted-foreground shadow-sm ring-1 ring-border">
+              Drag the pin to set exact location
+            </div>
+          </div>
+          <GeoIndicator geo={geo} />
+        </div>
       )}
     </Card>
   );
