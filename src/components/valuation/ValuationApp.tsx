@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
 import {
   Building2,
   MapPin,
@@ -26,6 +26,11 @@ import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 
 type LocationMode = "text" | "pin";
+
+// Client-only Leaflet map (Leaflet touches `window` at import time).
+const MapPicker = lazy(() =>
+  import("./MapPicker").then((m) => ({ default: m.MapPicker })),
+);
 
 interface FormState {
   address: string;
@@ -143,6 +148,14 @@ async function nominatimSearch(
   return (await res.json()) as Array<{ lat: string; lon: string; display_name: string }>;
 }
 
+async function nominatimReverse(lat: number, lon: number): Promise<string | null> {
+  const url = `https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lon}&format=json&zoom=18&addressdetails=1`;
+  const res = await fetch(url, { headers: { Accept: "application/json" } });
+  if (!res.ok) return null;
+  const data = (await res.json()) as { display_name?: string };
+  return data.display_name ?? null;
+}
+
 export function ValuationApp() {
   const [locMode, setLocMode] = useState<LocationMode>("text");
   const [form, setForm] = useState<FormState>({
@@ -163,10 +176,45 @@ export function ValuationApp() {
   const update = <K extends keyof FormState>(k: K, v: FormState[K]) =>
     setForm((f) => ({ ...f, [k]: v }));
 
+  // Ignore address→geocode effect for the next address change (used after
+  // reverse-geocoding a dragged pin, so we don't fight the user's chosen coords).
+  const skipNextGeocode = useRef(false);
+
+  const handlePinDrag = async (newLat: number, newLng: number) => {
+    setForm((f) => ({ ...f, lat: newLat, lng: newLng }));
+    setGeo({ kind: "loading" });
+    try {
+      const display = await nominatimReverse(newLat, newLng);
+      if (display) {
+        skipNextGeocode.current = true;
+        setForm((f) => ({ ...f, address: display, lat: newLat, lng: newLng }));
+        setGeo({ kind: "success", lat: newLat, lon: newLng, display });
+      } else {
+        setGeo({
+          kind: "success",
+          lat: newLat,
+          lon: newLng,
+          display: `${newLat.toFixed(5)}, ${newLng.toFixed(5)}`,
+        });
+      }
+    } catch {
+      setGeo({
+        kind: "success",
+        lat: newLat,
+        lon: newLng,
+        display: `${newLat.toFixed(5)}, ${newLng.toFixed(5)}`,
+      });
+    }
+  };
+
   // Debounced geocoding via OpenStreetMap Nominatim
   const geocodeSeq = useRef(0);
   useEffect(() => {
     if (locMode !== "text") return;
+    if (skipNextGeocode.current) {
+      skipNextGeocode.current = false;
+      return;
+    }
     const q = form.address.trim();
     if (q.length < 4) {
       setGeo({ kind: "idle" });
