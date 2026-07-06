@@ -327,6 +327,7 @@ export function ValuationApp() {
               lat={form.lat}
               lng={form.lng}
               geo={geo}
+              onPinChange={handlePinDrag}
             />
             <AttributesCard form={form} update={update} />
             <Button
