@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
 import {
   Building2,
   MapPin,
@@ -26,6 +26,11 @@ import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 
 type LocationMode = "text" | "pin";
+
+// Client-only Leaflet map (Leaflet touches `window` at import time).
+const MapPicker = lazy(() =>
+  import("./MapPicker").then((m) => ({ default: m.MapPicker })),
+);
 
 interface FormState {
   address: string;
@@ -143,6 +148,14 @@ async function nominatimSearch(
   return (await res.json()) as Array<{ lat: string; lon: string; display_name: string }>;
 }
 
+async function nominatimReverse(lat: number, lon: number): Promise<string | null> {
+  const url = `https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lon}&format=json&zoom=18&addressdetails=1`;
+  const res = await fetch(url, { headers: { Accept: "application/json" } });
+  if (!res.ok) return null;
+  const data = (await res.json()) as { display_name?: string };
+  return data.display_name ?? null;
+}
+
 export function ValuationApp() {
   const [locMode, setLocMode] = useState<LocationMode>("text");
   const [form, setForm] = useState<FormState>({
@@ -163,10 +176,45 @@ export function ValuationApp() {
   const update = <K extends keyof FormState>(k: K, v: FormState[K]) =>
     setForm((f) => ({ ...f, [k]: v }));
 
+  // Ignore address→geocode effect for the next address change (used after
+  // reverse-geocoding a dragged pin, so we don't fight the user's chosen coords).
+  const skipNextGeocode = useRef(false);
+
+  const handlePinDrag = async (newLat: number, newLng: number) => {
+    setForm((f) => ({ ...f, lat: newLat, lng: newLng }));
+    setGeo({ kind: "loading" });
+    try {
+      const display = await nominatimReverse(newLat, newLng);
+      if (display) {
+        skipNextGeocode.current = true;
+        setForm((f) => ({ ...f, address: display, lat: newLat, lng: newLng }));
+        setGeo({ kind: "success", lat: newLat, lon: newLng, display });
+      } else {
+        setGeo({
+          kind: "success",
+          lat: newLat,
+          lon: newLng,
+          display: `${newLat.toFixed(5)}, ${newLng.toFixed(5)}`,
+        });
+      }
+    } catch {
+      setGeo({
+        kind: "success",
+        lat: newLat,
+        lon: newLng,
+        display: `${newLat.toFixed(5)}, ${newLng.toFixed(5)}`,
+      });
+    }
+  };
+
   // Debounced geocoding via OpenStreetMap Nominatim
   const geocodeSeq = useRef(0);
   useEffect(() => {
     if (locMode !== "text") return;
+    if (skipNextGeocode.current) {
+      skipNextGeocode.current = false;
+      return;
+    }
     const q = form.address.trim();
     if (q.length < 4) {
       setGeo({ kind: "idle" });
@@ -279,6 +327,7 @@ export function ValuationApp() {
               lat={form.lat}
               lng={form.lng}
               geo={geo}
+              onPinChange={handlePinDrag}
             />
             <AttributesCard form={form} update={update} />
             <Button
@@ -401,6 +450,7 @@ function LocationCard({
   lat,
   lng,
   geo,
+  onPinChange,
 }: {
   mode: LocationMode;
   setMode: (m: LocationMode) => void;
@@ -409,6 +459,7 @@ function LocationCard({
   lat: number | null;
   lng: number | null;
   geo: GeoStatus;
+  onPinChange: (lat: number, lng: number) => void;
 }) {
   return (
     <Card className="border-border/60 p-5 shadow-[var(--shadow-card)]">
@@ -460,7 +511,28 @@ function LocationCard({
           <GeoIndicator geo={geo} />
         </div>
       ) : (
-        <MapPlaceholder lat={lat ?? 0} lng={lng ?? 0} label="Drag the pin to set exact location" />
+        <div className="space-y-2">
+          <div className="relative h-72 w-full overflow-hidden rounded-lg border border-border bg-slate-surface">
+            <Suspense
+              fallback={
+                <div className="grid h-full w-full place-items-center text-xs text-muted-foreground">
+                  <span className="inline-flex items-center gap-1.5">
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" /> Loading map…
+                  </span>
+                </div>
+              }
+            >
+              <MapPicker lat={lat} lng={lng} onChange={onPinChange} />
+            </Suspense>
+            <div className="pointer-events-none absolute bottom-2 left-2 z-[400] rounded-md bg-card/95 px-2 py-1 font-mono text-[10px] text-muted-foreground shadow-sm ring-1 ring-border">
+              {(lat ?? 0).toFixed(5)}, {(lng ?? 0).toFixed(5)}
+            </div>
+            <div className="pointer-events-none absolute bottom-2 right-2 z-[400] rounded-md bg-card/95 px-2 py-1 text-[10px] font-medium text-muted-foreground shadow-sm ring-1 ring-border">
+              Drag the pin to set exact location
+            </div>
+          </div>
+          <GeoIndicator geo={geo} />
+        </div>
       )}
     </Card>
   );
