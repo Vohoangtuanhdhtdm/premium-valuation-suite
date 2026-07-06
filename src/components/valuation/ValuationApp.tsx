@@ -1,5 +1,21 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Building2, MapPin, Type, Loader2, Sparkles, TrendingUp, TrendingDown, Home, Ruler, Layers, DoorOpen, Bath, BedDouble, CheckCircle2, AlertCircle } from "lucide-react";
+import {
+  Building2,
+  MapPin,
+  Type,
+  Loader2,
+  Sparkles,
+  TrendingUp,
+  TrendingDown,
+  Home,
+  Ruler,
+  Layers,
+  DoorOpen,
+  Bath,
+  BedDouble,
+  CheckCircle2,
+  AlertCircle,
+} from "lucide-react";
 import { toast } from "sonner";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -41,13 +57,16 @@ type GeoStatus =
   | { kind: "success"; lat: number; lon: number; display: string }
   | { kind: "error"; message: string };
 
-const VND = (v: number) => {
-  if (v >= 1_000_000_000)
-    return `${(v / 1_000_000_000).toLocaleString("en-US", { maximumFractionDigits: 2 })}B`;
-  if (v >= 1_000_000)
-    return `${(v / 1_000_000).toLocaleString("en-US", { maximumFractionDigits: 1 })}M`;
-  return v.toLocaleString("en-US");
-};
+function VND(amount: number) {
+  // Hàm format tiền tệ VNĐ hiển thị rút gọn (tỷ, triệu)
+  if (amount >= 1e9) {
+    return (amount / 1e9).toFixed(2).replace(/\.00$/, "") + " tỷ";
+  }
+  if (amount >= 1e6) {
+    return (amount / 1e6).toFixed(1).replace(/\.0$/, "") + " triệu";
+  }
+  return amount.toLocaleString("vi-VN");
+}
 
 function clamp(v: number, min: number, max: number) {
   return Math.min(max, Math.max(min, v));
@@ -88,11 +107,20 @@ async function callValuationAPI(input: {
   const total = Number(data?.valuation?.total_price_vnd ?? 0);
   const unit = Number(data?.valuation?.unit_price_vnd ?? 0);
   const score = Math.round(Number(data?.spatial_insights?.score_100 ?? 0));
-  const shapley = data?.shapley ?? {};
-  const shap: ShapFactor[] = [
-    { label: "Area", impact: Math.round(Number(shapley.area ?? 0) * 100) / 100 },
-    { label: "Spatial Location", impact: Math.round(Number(shapley.spatial ?? 0) * 100) / 100 },
-  ].sort((a, b) => Math.abs(b.impact) - Math.abs(a.impact));
+
+  // Xử lý luồng SHAP động từ Backend
+  const shapleyData = Array.isArray(data?.shapley) ? data.shapley : [];
+
+  const shap: ShapFactor[] = shapleyData
+    .map((item: any) => ({
+      label: item.label,
+      impact: Math.round(Number(item.impact) * 100) / 100, // Làm tròn 2 chữ số thập phân
+    }))
+    // Tùy chọn: Chỉ hiển thị các yếu tố có sức ảnh hưởng đáng kể (trị tuyệt đối >= 1%)
+    // để tránh biểu đồ bị nhiễu bởi các thanh quá nhỏ
+    .filter((item: ShapFactor) => Math.abs(item.impact) >= 1.0)
+    // Sắp xếp các thanh đồ thị từ yếu tố tác động mạnh nhất đến yếu nhất
+    .sort((a: ShapFactor, b: ShapFactor) => Math.abs(b.impact) - Math.abs(a.impact));
 
   return { total, unit, score, shap };
 }
@@ -106,7 +134,9 @@ function normalizeAddress(input: string): string {
     .trim();
 }
 
-async function nominatimSearch(q: string): Promise<Array<{ lat: string; lon: string; display_name: string }>> {
+async function nominatimSearch(
+  q: string,
+): Promise<Array<{ lat: string; lon: string; display_name: string }>> {
   const url = `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(q + ", Vietnam")}&format=json&limit=1`;
   const res = await fetch(url, { headers: { Accept: "application/json" } });
   if (!res.ok) throw new Error(`Geocoding ${res.status}`);
@@ -154,7 +184,11 @@ export function ValuationApp() {
         // Attempt 2 — normalized (English → Vietnamese) fallback
         if (!arr.length) {
           const normalized = normalizeAddress(q);
-          if (normalized && normalized.toLowerCase() !== q.toLowerCase() && normalized.length >= 3) {
+          if (
+            normalized &&
+            normalized.toLowerCase() !== q.toLowerCase() &&
+            normalized.length >= 3
+          ) {
             arr = await nominatimSearch(normalized);
             if (seq !== geocodeSeq.current) return;
           }
@@ -196,7 +230,9 @@ export function ValuationApp() {
 
   const handleValuate = async () => {
     if (!valid || form.lat === null || form.lng === null) {
-      toast.error("Missing data", { description: "Please enter a valid address to resolve coordinates." });
+      toast.error("Missing data", {
+        description: "Please enter a valid address to resolve coordinates.",
+      });
       return;
     }
     setLoading(true);
@@ -215,7 +251,9 @@ export function ValuationApp() {
       toast.success("Valuation completed");
       // scroll to result on mobile
       setTimeout(() => {
-        document.getElementById("valuation-output")?.scrollIntoView({ behavior: "smooth", block: "start" });
+        document
+          .getElementById("valuation-output")
+          ?.scrollIntoView({ behavior: "smooth", block: "start" });
       }, 100);
     } catch (e) {
       const msg = (e as Error).message || "Could not reach the valuation service";
@@ -268,17 +306,14 @@ export function ValuationApp() {
 
           {/* Column 2 — Output */}
           <section id="valuation-output" className="min-w-0">
-            {result ? (
-              <ResultDashboard result={result} />
-            ) : (
-              <EmptyState loading={loading} />
-            )}
+            {result ? <ResultDashboard result={result} /> : <EmptyState loading={loading} />}
           </section>
         </div>
       </main>
       <footer className="border-t border-border bg-card/50 py-6">
         <div className="mx-auto max-w-[1400px] px-4 text-center text-xs text-muted-foreground sm:px-6 lg:px-8">
-          © 2026 PropValue AI · Valuation model provided for reference in banking and real estate use cases
+          © 2026 PropValue AI · Valuation model provided for reference in banking and real estate
+          use cases
         </div>
       </footer>
     </div>
@@ -299,14 +334,34 @@ function TopNav() {
           </div>
           <div className="min-w-0">
             <div className="text-sm font-bold tracking-tight text-foreground">PropValue AI</div>
-            <div className="text-[10px] uppercase tracking-[0.15em] text-muted-foreground">Real Estate Valuation</div>
+            <div className="text-[10px] uppercase tracking-[0.15em] text-muted-foreground">
+              Real Estate Valuation
+            </div>
           </div>
         </div>
         <div className="hidden items-center gap-6 sm:flex">
-          <a className="text-sm font-medium text-muted-foreground transition-colors hover:text-foreground" href="#">Valuation</a>
-          <a className="text-sm font-medium text-muted-foreground transition-colors hover:text-foreground" href="#">Reports</a>
-          <a className="text-sm font-medium text-muted-foreground transition-colors hover:text-foreground" href="#">API</a>
-          <Badge className="border-success/30 bg-success/10 text-success hover:bg-success/15" variant="outline">
+          <a
+            className="text-sm font-medium text-muted-foreground transition-colors hover:text-foreground"
+            href="#"
+          >
+            Valuation
+          </a>
+          <a
+            className="text-sm font-medium text-muted-foreground transition-colors hover:text-foreground"
+            href="#"
+          >
+            Reports
+          </a>
+          <a
+            className="text-sm font-medium text-muted-foreground transition-colors hover:text-foreground"
+            href="#"
+          >
+            API
+          </a>
+          <Badge
+            className="border-success/30 bg-success/10 text-success hover:bg-success/15"
+            variant="outline"
+          >
             <span className="mr-1 inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-success" />
             Model v3.2 · Live
           </Badge>
@@ -326,7 +381,9 @@ function Header() {
         Accurate Property Valuation
       </h1>
       <p className="mt-3 text-base text-muted-foreground">
-        Our machine learning model analyzes over 40 spatial and structural features — location, infrastructure, and comparable transactions — to produce a trusted price range for mortgage, sale, and investment decisions.
+        Our machine learning model analyzes over 40 spatial and structural features — location,
+        infrastructure, and comparable transactions — to produce a trusted price range for mortgage,
+        sale, and investment decisions.
       </p>
     </div>
   );
@@ -748,8 +805,13 @@ function EmptyState({ loading }: { loading: boolean }) {
             { k: "AI Explainability", v: "SHAP factors" },
             { k: "Comparable Sales", v: "15 nearby" },
           ].map((it) => (
-            <div key={it.k} className="rounded-lg border border-border bg-background/60 p-3 text-left">
-              <div className="text-[10px] uppercase tracking-wider text-muted-foreground">{it.k}</div>
+            <div
+              key={it.k}
+              className="rounded-lg border border-border bg-background/60 p-3 text-left"
+            >
+              <div className="text-[10px] uppercase tracking-wider text-muted-foreground">
+                {it.k}
+              </div>
               <div className="mt-0.5 text-sm font-semibold text-foreground">{it.v}</div>
             </div>
           ))}
@@ -809,26 +871,44 @@ function SpatialScoreCard({ score }: { score: number }) {
   const stroke = 12;
   const r = (size - stroke) / 2;
   const c = 2 * Math.PI * r;
-  const dash = (score / 100) * c;
-  const good = score > 70;
+
+  // Sử dụng state để quản lý animation từ 0 chạy lên giá trị thực tế
+  const [animatedScore, setAnimatedScore] = useState(0);
+
+  useEffect(() => {
+    // Delay nhẹ 100ms để đảm bảo CSS transition được kích hoạt sau khi component mount
+    const timer = setTimeout(() => {
+      setAnimatedScore(score || 0);
+    }, 100);
+    return () => clearTimeout(timer);
+  }, [score]);
+
+  // Sử dụng strokeDashoffset thay vì Dasharray để animation mượt mà chuẩn xác
+  const dashoffset = c - (animatedScore / 100) * c;
+
+  const good = animatedScore > 70;
   const message = good
     ? "Prime location with strong benefit from surrounding amenities."
-    : score > 45
-    ? "Good location, convenient for daily life and commerce."
-    : "Average location with moderate development potential.";
-  const color = good ? "var(--success)" : score > 45 ? "var(--primary-glow)" : "var(--warning)";
+    : animatedScore > 45
+      ? "Good location, convenient for daily life and commerce."
+      : "Average location with moderate development potential.";
+
+  // Màu sắc fallback nếu CSS variable chưa load kịp
+  const color = good
+    ? "var(--success, #10b981)"
+    : animatedScore > 45
+      ? "var(--primary-glow, #3b82f6)"
+      : "var(--warning, #f59e0b)";
+
   return (
     <Card className="border-border/60 p-6 shadow-[var(--shadow-card)]">
       <div className="flex items-center justify-between">
         <div>
           <h3 className="text-sm font-semibold text-foreground">Spatial Premium Score</h3>
-          <p className="text-xs text-muted-foreground">Amenities, infrastructure, and transport connectivity</p>
+          <p className="text-xs text-muted-foreground">
+            Amenities, infrastructure, and transport connectivity
+          </p>
         </div>
-        {good && (
-          <Badge className="border-success/30 bg-success/10 text-success" variant="outline">
-            Prime
-          </Badge>
-        )}
       </div>
 
       <div className="mt-4 flex flex-col items-center gap-4 sm:flex-row sm:items-center sm:gap-6">
@@ -839,7 +919,7 @@ function SpatialScoreCard({ score }: { score: number }) {
               cy={size / 2}
               r={r}
               fill="none"
-              stroke="var(--muted)"
+              stroke="var(--muted, #e2e8f0)"
               strokeWidth={stroke}
             />
             <circle
@@ -850,12 +930,15 @@ function SpatialScoreCard({ score }: { score: number }) {
               stroke={color}
               strokeWidth={stroke}
               strokeLinecap="round"
-              strokeDasharray={`${dash} ${c}`}
-              style={{ transition: "stroke-dasharray 0.9s cubic-bezier(0.4,0,0.2,1)" }}
+              strokeDasharray={c}
+              strokeDashoffset={dashoffset}
+              style={{
+                transition: "stroke-dashoffset 1.5s cubic-bezier(0.4,0,0.2,1), stroke 1.5s ease",
+              }}
             />
           </svg>
           <div className="absolute inset-0 flex flex-col items-center justify-center">
-            <div className="text-4xl font-black tabular-nums text-foreground">{score}</div>
+            <div className="text-4xl font-black tabular-nums text-foreground">{animatedScore}</div>
             <div className="text-[10px] uppercase tracking-widest text-muted-foreground">/ 100</div>
           </div>
         </div>
@@ -866,18 +949,28 @@ function SpatialScoreCard({ score }: { score: number }) {
 }
 
 function ShapCard({ shap }: { shap: ShapFactor[] }) {
+  // Phòng ngừa trường hợp mảng shap bị rỗng hoặc lỗi từ backend
+  if (!shap || shap.length === 0) return null;
+
   const data = shap.map((s) => ({ ...s, absImpact: Math.abs(s.impact) }));
   const max = Math.max(...data.map((d) => d.absImpact), 5);
+
   return (
     <Card className="border-border/60 p-6 shadow-[var(--shadow-card)]">
       <div className="mb-4 flex items-center justify-between">
         <div>
           <h3 className="text-sm font-semibold text-foreground">Price Impact Factors (SHAP)</h3>
-          <p className="text-xs text-muted-foreground">Contribution of each feature to the final value</p>
+          <p className="text-xs text-muted-foreground">
+            Contribution of each feature to the final value
+          </p>
         </div>
         <div className="flex items-center gap-3 text-[10px] text-muted-foreground">
-          <span className="flex items-center gap-1"><span className="h-2 w-2 rounded-sm bg-success" /> Increase</span>
-          <span className="flex items-center gap-1"><span className="h-2 w-2 rounded-sm bg-destructive" /> Decrease</span>
+          <span className="flex items-center gap-1">
+            <span className="h-2 w-2 rounded-sm bg-success" /> Increase
+          </span>
+          <span className="flex items-center gap-1">
+            <span className="h-2 w-2 rounded-sm bg-destructive" /> Decrease
+          </span>
         </div>
       </div>
 
@@ -886,7 +979,10 @@ function ShapCard({ shap }: { shap: ShapFactor[] }) {
           const positive = f.impact >= 0;
           const width = (f.absImpact / max) * 100;
           return (
-            <div key={f.label} className="grid grid-cols-[minmax(0,120px)_1fr_auto] items-center gap-3">
+            <div
+              key={f.label}
+              className="grid grid-cols-[minmax(0,120px)_1fr_auto] items-center gap-3"
+            >
               <div className="truncate text-xs font-medium text-foreground">
                 {positive ? (
                   <TrendingUp className="mr-1 inline h-3 w-3 text-success" />
@@ -899,7 +995,7 @@ function ShapCard({ shap }: { shap: ShapFactor[] }) {
                 <div
                   className={`absolute inset-y-0 left-0 rounded-md ${
                     positive ? "bg-success/85" : "bg-destructive/85"
-                  } transition-[width] duration-700`}
+                  } transition-[width] duration-700 ease-out`}
                   style={{ width: `${width}%` }}
                 />
               </div>
@@ -915,7 +1011,6 @@ function ShapCard({ shap }: { shap: ShapFactor[] }) {
           );
         })}
       </div>
-
     </Card>
   );
 }
