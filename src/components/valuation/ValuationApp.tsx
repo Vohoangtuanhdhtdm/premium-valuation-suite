@@ -932,12 +932,26 @@ function EmptyState({ loading }: { loading: boolean }) {
 }
 
 function ResultDashboard({ result }: { result: ValuationResult }) {
+  const isWarning = result.status === "warning";
   return (
     <div className="grid grid-cols-1 gap-5 md:grid-cols-2">
+      {isWarning && result.message && (
+        <div className="md:col-span-2">
+          <div className="flex items-start gap-3 rounded-lg border border-yellow-400 bg-yellow-50 p-4 text-yellow-800 shadow-sm">
+            <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-yellow-600" />
+            <div className="min-w-0">
+              <div className="text-sm font-semibold">Baseline valuation mode</div>
+              <p className="mt-1 text-xs leading-relaxed text-yellow-800/90">
+                {result.message}
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
       <CommercialValueCard result={result} />
-      <SpatialScoreCard score={result.score} />
+      <SpatialScoreCard score={result.score} status={result.status} />
       <div className="md:col-span-2">
-        <ShapCard shap={result.shap} />
+        <ShapCard shap={result.shap} status={result.status} />
       </div>
     </div>
   );
@@ -976,7 +990,13 @@ function CommercialValueCard({ result }: { result: ValuationResult }) {
   );
 }
 
-function SpatialScoreCard({ score }: { score: number }) {
+function SpatialScoreCard({
+  score,
+  status = "success",
+}: {
+  score: number;
+  status?: "success" | "warning";
+}) {
   const size = 148;
   const stroke = 12;
   const r = (size - stroke) / 2;
@@ -996,19 +1016,25 @@ function SpatialScoreCard({ score }: { score: number }) {
   // Sử dụng strokeDashoffset thay vì Dasharray để animation mượt mà chuẩn xác
   const dashoffset = c - (animatedScore / 100) * c;
 
+  const isWarning = status === "warning";
   const good = animatedScore > 70;
-  const message = good
+  const message = isWarning
+    ? "Baseline score — insufficient neighborhood data for full spatial analysis."
+    : good
     ? "Prime location with strong benefit from surrounding amenities."
     : animatedScore > 45
       ? "Good location, convenient for daily life and commerce."
       : "Average location with moderate development potential.";
 
-  // Màu sắc fallback nếu CSS variable chưa load kịp
-  const color = good
+  const color = isWarning
+    ? "var(--warning, #a1a1aa)"
+    : good
     ? "var(--success, #10b981)"
     : animatedScore > 45
       ? "var(--primary-glow, #3b82f6)"
       : "var(--warning, #f59e0b)";
+
+  const scoreTextClass = isWarning ? "text-yellow-700" : "text-foreground";
 
   return (
     <Card className="border-border/60 p-6 shadow-[var(--shadow-card)]">
@@ -1048,19 +1074,51 @@ function SpatialScoreCard({ score }: { score: number }) {
             />
           </svg>
           <div className="absolute inset-0 flex flex-col items-center justify-center">
-            <div className="text-4xl font-black tabular-nums text-foreground">{animatedScore}</div>
+            <div className={`text-4xl font-black tabular-nums ${scoreTextClass}`}>
+              {animatedScore}
+            </div>
             <div className="text-[10px] uppercase tracking-widest text-muted-foreground">/ 100</div>
           </div>
         </div>
-        <p className="text-sm leading-relaxed text-foreground">{message}</p>
+        <p
+          className={`text-sm leading-relaxed ${
+            isWarning ? "text-yellow-800" : "text-foreground"
+          }`}
+        >
+          {message}
+        </p>
       </div>
     </Card>
   );
 }
 
-function ShapCard({ shap }: { shap: ShapFactor[] }) {
-  // Phòng ngừa trường hợp mảng shap bị rỗng hoặc lỗi từ backend
-  if (!shap || shap.length === 0) return null;
+function ShapCard({
+  shap,
+  status = "success",
+}: {
+  shap: ShapFactor[];
+  status?: "success" | "warning";
+}) {
+  if (!shap || shap.length === 0) {
+    return (
+      <Card className="border-border/60 bg-muted/30 p-6 shadow-[var(--shadow-card)]">
+        <div className="flex items-start gap-3">
+          <div className="grid h-10 w-10 shrink-0 place-items-center rounded-md bg-muted text-muted-foreground">
+            <Info className="h-5 w-5" />
+          </div>
+          <div>
+            <h3 className="text-sm font-semibold text-foreground">
+              Price Impact Factors (SHAP)
+            </h3>
+            <p className="mt-1 text-sm leading-relaxed text-muted-foreground">
+              Advanced feature contribution analysis (SHAP) is disabled for this location
+              due to insufficient neighborhood data.
+            </p>
+          </div>
+        </div>
+      </Card>
+    );
+  }
 
   const data = shap.map((s) => ({ ...s, absImpact: Math.abs(s.impact) }));
   const max = Math.max(...data.map((d) => d.absImpact), 5);
