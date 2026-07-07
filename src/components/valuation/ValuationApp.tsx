@@ -684,7 +684,7 @@ function AttributesCard({
             <NumberInline
               value={form.area}
               min={10}
-              max={500}
+              max={1000}
               onChange={(v) => update("area", v)}
               suffix="m²"
             />
@@ -692,13 +692,13 @@ function AttributesCard({
           <Slider
             value={[form.area]}
             min={10}
-            max={500}
+            max={1000}
             step={1}
             onValueChange={([v]) => update("area", v)}
           />
           <div className="mt-1 flex justify-between text-[10px] text-muted-foreground">
             <span>10</span>
-            <span>500 m²</span>
+            <span>1000 m²</span>
           </div>
         </div>
 
@@ -740,16 +740,16 @@ function AttributesCard({
             label="Bedrooms"
             icon={<BedDouble className="h-3.5 w-3.5" />}
             value={form.bedrooms}
-            min={0}
-            max={15}
+            min={1}
+            max={30}
             onChange={(v) => update("bedrooms", v)}
           />
           <Stepper
             label="Bathrooms"
             icon={<Bath className="h-3.5 w-3.5" />}
             value={form.bathrooms}
-            min={0}
-            max={15}
+            min={1}
+            max={30}
             onChange={(v) => update("bathrooms", v)}
           />
         </div>
