@@ -15,6 +15,8 @@ import {
   BedDouble,
   CheckCircle2,
   AlertCircle,
+  AlertTriangle,
+  Info,
 } from "lucide-react";
 import { toast } from "sonner";
 import { Card } from "@/components/ui/card";
@@ -54,6 +56,8 @@ interface ValuationResult {
   unit: number; // VND / m²
   score: number; // 0-100
   shap: ShapFactor[];
+  status: "success" | "warning";
+  message?: string;
 }
 
 type GeoStatus =
@@ -96,6 +100,13 @@ async function callValuationAPI(input: {
   });
 
   if (!res.ok) {
+    if (res.status === 422) {
+      const err = new Error(
+        "Dữ liệu cấu trúc hoặc tọa độ vượt quá giới hạn phân tích của hệ thống.",
+      );
+      (err as any).code = 422;
+      throw err;
+    }
     let detail = `${res.status} ${res.statusText}`;
     try {
       const err = await res.json();
@@ -109,6 +120,9 @@ async function callValuationAPI(input: {
   }
 
   const data = await res.json();
+  const status: "success" | "warning" = data?.status === "warning" ? "warning" : "success";
+  const message: string | undefined =
+    typeof data?.message === "string" ? data.message : undefined;
   const total = Number(data?.valuation?.total_price_vnd ?? 0);
   const unit = Number(data?.valuation?.unit_price_vnd ?? 0);
   const score = Math.round(Number(data?.spatial_insights?.score_100 ?? 0));
@@ -127,7 +141,7 @@ async function callValuationAPI(input: {
     // Sắp xếp các thanh đồ thị từ yếu tố tác động mạnh nhất đến yếu nhất
     .sort((a: ShapFactor, b: ShapFactor) => Math.abs(b.impact) - Math.abs(a.impact));
 
-  return { total, unit, score, shap };
+  return { total, unit, score, shap, status, message };
 }
 
 function normalizeAddress(input: string): string {
@@ -264,13 +278,17 @@ export function ValuationApp() {
   const valid = useMemo(() => {
     return (
       form.area >= 10 &&
-      form.area <= 500 &&
+      form.area <= 1000 &&
       form.floors >= 1 &&
       form.floors <= 20 &&
       form.frontage >= 1 &&
       form.frontage <= 50 &&
       form.roadWidth >= 1 &&
       form.roadWidth <= 120 &&
+      form.bedrooms >= 1 &&
+      form.bedrooms <= 30 &&
+      form.bathrooms >= 1 &&
+      form.bathrooms <= 30 &&
       form.lat !== null &&
       form.lng !== null
     );
@@ -304,8 +322,14 @@ export function ValuationApp() {
           ?.scrollIntoView({ behavior: "smooth", block: "start" });
       }, 100);
     } catch (e) {
-      const msg = (e as Error).message || "Could not reach the valuation service";
-      toast.error("Valuation failed", { description: msg });
+      const err = e as Error & { code?: number };
+      if (err.code === 422) {
+        toast.error(err.message);
+      } else {
+        toast.error("Valuation failed", {
+          description: err.message || "Could not reach the valuation service",
+        });
+      }
     } finally {
       setLoading(false);
     }
