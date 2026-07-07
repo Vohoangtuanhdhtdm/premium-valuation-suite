@@ -15,6 +15,8 @@ import {
   BedDouble,
   CheckCircle2,
   AlertCircle,
+  AlertTriangle,
+  Info,
 } from "lucide-react";
 import { toast } from "sonner";
 import { Card } from "@/components/ui/card";
@@ -54,6 +56,8 @@ interface ValuationResult {
   unit: number; // VND / m²
   score: number; // 0-100
   shap: ShapFactor[];
+  status: "success" | "warning";
+  message?: string;
 }
 
 type GeoStatus =
@@ -96,6 +100,13 @@ async function callValuationAPI(input: {
   });
 
   if (!res.ok) {
+    if (res.status === 422) {
+      const err = new Error(
+        "Dữ liệu cấu trúc hoặc tọa độ vượt quá giới hạn phân tích của hệ thống.",
+      );
+      (err as any).code = 422;
+      throw err;
+    }
     let detail = `${res.status} ${res.statusText}`;
     try {
       const err = await res.json();
@@ -109,6 +120,9 @@ async function callValuationAPI(input: {
   }
 
   const data = await res.json();
+  const status: "success" | "warning" = data?.status === "warning" ? "warning" : "success";
+  const message: string | undefined =
+    typeof data?.message === "string" ? data.message : undefined;
   const total = Number(data?.valuation?.total_price_vnd ?? 0);
   const unit = Number(data?.valuation?.unit_price_vnd ?? 0);
   const score = Math.round(Number(data?.spatial_insights?.score_100 ?? 0));
@@ -127,7 +141,7 @@ async function callValuationAPI(input: {
     // Sắp xếp các thanh đồ thị từ yếu tố tác động mạnh nhất đến yếu nhất
     .sort((a: ShapFactor, b: ShapFactor) => Math.abs(b.impact) - Math.abs(a.impact));
 
-  return { total, unit, score, shap };
+  return { total, unit, score, shap, status, message };
 }
 
 function normalizeAddress(input: string): string {
@@ -264,13 +278,17 @@ export function ValuationApp() {
   const valid = useMemo(() => {
     return (
       form.area >= 10 &&
-      form.area <= 500 &&
+      form.area <= 1000 &&
       form.floors >= 1 &&
       form.floors <= 20 &&
       form.frontage >= 1 &&
       form.frontage <= 50 &&
       form.roadWidth >= 1 &&
       form.roadWidth <= 120 &&
+      form.bedrooms >= 1 &&
+      form.bedrooms <= 30 &&
+      form.bathrooms >= 1 &&
+      form.bathrooms <= 30 &&
       form.lat !== null &&
       form.lng !== null
     );
@@ -304,8 +322,14 @@ export function ValuationApp() {
           ?.scrollIntoView({ behavior: "smooth", block: "start" });
       }, 100);
     } catch (e) {
-      const msg = (e as Error).message || "Could not reach the valuation service";
-      toast.error("Valuation failed", { description: msg });
+      const err = e as Error & { code?: number };
+      if (err.code === 422) {
+        toast.error(err.message);
+      } else {
+        toast.error("Valuation failed", {
+          description: err.message || "Could not reach the valuation service",
+        });
+      }
     } finally {
       setLoading(false);
     }
@@ -660,7 +684,7 @@ function AttributesCard({
             <NumberInline
               value={form.area}
               min={10}
-              max={500}
+              max={1000}
               onChange={(v) => update("area", v)}
               suffix="m²"
             />
@@ -668,13 +692,13 @@ function AttributesCard({
           <Slider
             value={[form.area]}
             min={10}
-            max={500}
+            max={1000}
             step={1}
             onValueChange={([v]) => update("area", v)}
           />
           <div className="mt-1 flex justify-between text-[10px] text-muted-foreground">
             <span>10</span>
-            <span>500 m²</span>
+            <span>1000 m²</span>
           </div>
         </div>
 
@@ -716,16 +740,16 @@ function AttributesCard({
             label="Bedrooms"
             icon={<BedDouble className="h-3.5 w-3.5" />}
             value={form.bedrooms}
-            min={0}
-            max={15}
+            min={1}
+            max={30}
             onChange={(v) => update("bedrooms", v)}
           />
           <Stepper
             label="Bathrooms"
             icon={<Bath className="h-3.5 w-3.5" />}
             value={form.bathrooms}
-            min={0}
-            max={15}
+            min={1}
+            max={30}
             onChange={(v) => update("bathrooms", v)}
           />
         </div>
@@ -747,14 +771,19 @@ function NumberInline({
   onChange: (v: number) => void;
   suffix?: string;
 }) {
+  const invalid = value < min || value > max;
   return (
-    <div className="flex items-center gap-1 rounded-md border border-border bg-background px-2 py-1">
+    <div
+      className={`flex items-center gap-1 rounded-md border bg-background px-2 py-1 ${
+        invalid ? "border-destructive ring-1 ring-destructive/40" : "border-border"
+      }`}
+    >
       <input
         type="number"
         value={value}
         min={min}
         max={max}
-        onChange={(e) => onChange(clamp(Number(e.target.value || 0), min, max))}
+        onChange={(e) => onChange(Number(e.target.value || 0))}
         className="w-14 bg-transparent text-right text-sm font-semibold tabular-nums text-foreground outline-none"
       />
       {suffix && <span className="text-xs text-muted-foreground">{suffix}</span>}
@@ -779,6 +808,7 @@ function NumField({
   step?: number;
   onChange: (v: number) => void;
 }) {
+  const invalid = value < min || value > max;
   return (
     <div>
       <Label className="mb-2 flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
@@ -790,11 +820,19 @@ function NumField({
         max={max}
         step={step}
         value={value}
-        onChange={(e) => onChange(clamp(Number(e.target.value || 0), min, max))}
-        className="h-10 border-border bg-background font-semibold tabular-nums"
+        onChange={(e) => onChange(Number(e.target.value || 0))}
+        className={`h-10 bg-background font-semibold tabular-nums ${
+          invalid
+            ? "border-destructive focus-visible:ring-destructive"
+            : "border-border"
+        }`}
       />
-      <div className="mt-1 text-[10px] text-muted-foreground">
-        {min} – {max}
+      <div
+        className={`mt-1 text-[10px] ${
+          invalid ? "font-medium text-destructive" : "text-muted-foreground"
+        }`}
+      >
+        {invalid ? `Must be between ${min} and ${max}` : `${min} – ${max}`}
       </div>
     </div>
   );
@@ -894,12 +932,26 @@ function EmptyState({ loading }: { loading: boolean }) {
 }
 
 function ResultDashboard({ result }: { result: ValuationResult }) {
+  const isWarning = result.status === "warning";
   return (
     <div className="grid grid-cols-1 gap-5 md:grid-cols-2">
+      {isWarning && result.message && (
+        <div className="md:col-span-2">
+          <div className="flex items-start gap-3 rounded-lg border border-yellow-400 bg-yellow-50 p-4 text-yellow-800 shadow-sm">
+            <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-yellow-600" />
+            <div className="min-w-0">
+              <div className="text-sm font-semibold">Baseline valuation mode</div>
+              <p className="mt-1 text-xs leading-relaxed text-yellow-800/90">
+                {result.message}
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
       <CommercialValueCard result={result} />
-      <SpatialScoreCard score={result.score} />
+      <SpatialScoreCard score={result.score} status={result.status} />
       <div className="md:col-span-2">
-        <ShapCard shap={result.shap} />
+        <ShapCard shap={result.shap} status={result.status} />
       </div>
     </div>
   );
@@ -938,7 +990,13 @@ function CommercialValueCard({ result }: { result: ValuationResult }) {
   );
 }
 
-function SpatialScoreCard({ score }: { score: number }) {
+function SpatialScoreCard({
+  score,
+  status = "success",
+}: {
+  score: number;
+  status?: "success" | "warning";
+}) {
   const size = 148;
   const stroke = 12;
   const r = (size - stroke) / 2;
@@ -958,19 +1016,25 @@ function SpatialScoreCard({ score }: { score: number }) {
   // Sử dụng strokeDashoffset thay vì Dasharray để animation mượt mà chuẩn xác
   const dashoffset = c - (animatedScore / 100) * c;
 
+  const isWarning = status === "warning";
   const good = animatedScore > 70;
-  const message = good
+  const message = isWarning
+    ? "Baseline score — insufficient neighborhood data for full spatial analysis."
+    : good
     ? "Prime location with strong benefit from surrounding amenities."
     : animatedScore > 45
       ? "Good location, convenient for daily life and commerce."
       : "Average location with moderate development potential.";
 
-  // Màu sắc fallback nếu CSS variable chưa load kịp
-  const color = good
+  const color = isWarning
+    ? "var(--warning, #a1a1aa)"
+    : good
     ? "var(--success, #10b981)"
     : animatedScore > 45
       ? "var(--primary-glow, #3b82f6)"
       : "var(--warning, #f59e0b)";
+
+  const scoreTextClass = isWarning ? "text-yellow-700" : "text-foreground";
 
   return (
     <Card className="border-border/60 p-6 shadow-[var(--shadow-card)]">
@@ -1010,19 +1074,51 @@ function SpatialScoreCard({ score }: { score: number }) {
             />
           </svg>
           <div className="absolute inset-0 flex flex-col items-center justify-center">
-            <div className="text-4xl font-black tabular-nums text-foreground">{animatedScore}</div>
+            <div className={`text-4xl font-black tabular-nums ${scoreTextClass}`}>
+              {animatedScore}
+            </div>
             <div className="text-[10px] uppercase tracking-widest text-muted-foreground">/ 100</div>
           </div>
         </div>
-        <p className="text-sm leading-relaxed text-foreground">{message}</p>
+        <p
+          className={`text-sm leading-relaxed ${
+            isWarning ? "text-yellow-800" : "text-foreground"
+          }`}
+        >
+          {message}
+        </p>
       </div>
     </Card>
   );
 }
 
-function ShapCard({ shap }: { shap: ShapFactor[] }) {
-  // Phòng ngừa trường hợp mảng shap bị rỗng hoặc lỗi từ backend
-  if (!shap || shap.length === 0) return null;
+function ShapCard({
+  shap,
+  status = "success",
+}: {
+  shap: ShapFactor[];
+  status?: "success" | "warning";
+}) {
+  if (!shap || shap.length === 0) {
+    return (
+      <Card className="border-border/60 bg-muted/30 p-6 shadow-[var(--shadow-card)]">
+        <div className="flex items-start gap-3">
+          <div className="grid h-10 w-10 shrink-0 place-items-center rounded-md bg-muted text-muted-foreground">
+            <Info className="h-5 w-5" />
+          </div>
+          <div>
+            <h3 className="text-sm font-semibold text-foreground">
+              Price Impact Factors (SHAP)
+            </h3>
+            <p className="mt-1 text-sm leading-relaxed text-muted-foreground">
+              Advanced feature contribution analysis (SHAP) is disabled for this location
+              due to insufficient neighborhood data.
+            </p>
+          </div>
+        </div>
+      </Card>
+    );
+  }
 
   const data = shap.map((s) => ({ ...s, absImpact: Math.abs(s.impact) }));
   const max = Math.max(...data.map((d) => d.absImpact), 5);
