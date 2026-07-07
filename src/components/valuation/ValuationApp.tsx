@@ -771,14 +771,19 @@ function NumberInline({
   onChange: (v: number) => void;
   suffix?: string;
 }) {
+  const invalid = value < min || value > max;
   return (
-    <div className="flex items-center gap-1 rounded-md border border-border bg-background px-2 py-1">
+    <div
+      className={`flex items-center gap-1 rounded-md border bg-background px-2 py-1 ${
+        invalid ? "border-destructive ring-1 ring-destructive/40" : "border-border"
+      }`}
+    >
       <input
         type="number"
         value={value}
         min={min}
         max={max}
-        onChange={(e) => onChange(clamp(Number(e.target.value || 0), min, max))}
+        onChange={(e) => onChange(Number(e.target.value || 0))}
         className="w-14 bg-transparent text-right text-sm font-semibold tabular-nums text-foreground outline-none"
       />
       {suffix && <span className="text-xs text-muted-foreground">{suffix}</span>}
@@ -803,6 +808,7 @@ function NumField({
   step?: number;
   onChange: (v: number) => void;
 }) {
+  const invalid = value < min || value > max;
   return (
     <div>
       <Label className="mb-2 flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
@@ -814,11 +820,19 @@ function NumField({
         max={max}
         step={step}
         value={value}
-        onChange={(e) => onChange(clamp(Number(e.target.value || 0), min, max))}
-        className="h-10 border-border bg-background font-semibold tabular-nums"
+        onChange={(e) => onChange(Number(e.target.value || 0))}
+        className={`h-10 bg-background font-semibold tabular-nums ${
+          invalid
+            ? "border-destructive focus-visible:ring-destructive"
+            : "border-border"
+        }`}
       />
-      <div className="mt-1 text-[10px] text-muted-foreground">
-        {min} – {max}
+      <div
+        className={`mt-1 text-[10px] ${
+          invalid ? "font-medium text-destructive" : "text-muted-foreground"
+        }`}
+      >
+        {invalid ? `Must be between ${min} and ${max}` : `${min} – ${max}`}
       </div>
     </div>
   );
